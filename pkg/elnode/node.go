@@ -26,7 +26,7 @@ func Start(t *testing.T, genesis *core.Genesis) *Node {
 	t.Helper()
 
 	stack, err := node.New(&node.Config{
-		DataDir: t.TempDir(),
+		DataDir: "", // empty = in-memory database (no pebble goroutines)
 		P2P: p2p.Config{
 			ListenAddr:  "",
 			MaxPeers:    0,
