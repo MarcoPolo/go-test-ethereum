@@ -12,6 +12,7 @@ import (
 
 	"github.com/OffchainLabs/prysm/v7/beacon-chain/das"
 	"github.com/OffchainLabs/prysm/v7/beacon-chain/db/filesystem"
+	"github.com/spf13/afero"
 	"github.com/OffchainLabs/prysm/v7/beacon-chain/execution"
 	"github.com/OffchainLabs/prysm/v7/beacon-chain/node"
 	"github.com/OffchainLabs/prysm/v7/beacon-chain/p2p"
@@ -110,9 +111,14 @@ func Start(t *testing.T, cfg Config) *Node {
 		}))
 	}
 
+	// Use the cancellable context for data column storage so its goroutines
+	// exit when the node is closed.
+	dcs := filesystem.NewEphemeralDataColumnStorageWithCtx(t, ctx, afero.NewMemMapFs())
+	dcs.WarmCache()
+
 	opts := []node.Option{
 		node.WithBlobStorage(filesystem.NewEphemeralBlobStorage(t)),
-		node.WithDataColumnStorage(filesystem.NewEphemeralDataColumnStorage(t)),
+		node.WithDataColumnStorage(dcs),
 		node.WithP2PConfig(p2pCfg),
 		node.WithSkipSignalHandler(),
 	}
