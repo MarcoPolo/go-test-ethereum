@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"net"
+
 	"github.com/OffchainLabs/prysm/v7/beacon-chain/das"
 	"github.com/OffchainLabs/prysm/v7/beacon-chain/db/filesystem"
 	"github.com/OffchainLabs/prysm/v7/beacon-chain/execution"
@@ -36,6 +38,10 @@ type Config struct {
 	MaxPeers uint
 	// QueueSize sets the pubsub queue size.
 	QueueSize uint
+	// GRPCListener is an optional custom listener for the gRPC server (e.g. bufconn).
+	GRPCListener net.Listener
+	// HTTPListener is an optional custom listener for the HTTP REST server (e.g. bufconn).
+	HTTPListener net.Listener
 }
 
 // Node wraps a Prysm beacon node.
@@ -107,6 +113,14 @@ func Start(t *testing.T, cfg Config) *Node {
 		node.WithBlobStorage(filesystem.NewEphemeralBlobStorage(t)),
 		node.WithDataColumnStorage(filesystem.NewEphemeralDataColumnStorage(t)),
 		node.WithP2PConfig(p2pCfg),
+	}
+	if cfg.GRPCListener != nil {
+		opts = append(opts, node.WithGRPCListener(cfg.GRPCListener))
+	}
+	if cfg.HTTPListener != nil {
+		opts = append(opts, node.WithHTTPListener(cfg.HTTPListener))
+	}
+	opts = append(opts,
 		// Inject the RPC client for Engine API
 		node.WithExecutionChainOptions([]execution.Option{
 			execution.WithRPCClient(cfg.RPCClient),
@@ -119,7 +133,7 @@ func Start(t *testing.T, cfg Config) *Node {
 			}
 			return nil
 		},
-	}
+	)
 
 	opts = append(configOpts, opts...)
 	beacon, err := node.New(cliCtx, cancel, nil, opts...)

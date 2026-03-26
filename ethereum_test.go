@@ -9,13 +9,11 @@ import (
 	"github.com/marcopolo/go-test-ethereum/pkg/elnode"
 	"github.com/marcopolo/go-test-ethereum/pkg/genesis"
 	"github.com/marcopolo/go-test-ethereum/pkg/quicnet"
+	"github.com/marcopolo/go-test-ethereum/pkg/valnode"
 	"github.com/marcopolo/simnet"
 )
 
 func TestEthereum(t *testing.T) {
-	// Start without synctest first to verify basic wiring works.
-	// Will add synctest.Test wrapper once initialization is confirmed working.
-
 	// 1. Setup simnet
 	sn := &simnet.Simnet{}
 	linkSettings := simnet.NodeBiDiLinkSettings{
@@ -31,20 +29,19 @@ func TestEthereum(t *testing.T) {
 	sn.Start()
 	t.Cleanup(func() { sn.Close() })
 
-	// 2. Generate genesis (EL + CL, minimal config, 64 validators)
+	// 2. Generate genesis (EL + CL, 64 validators, Fulu fork)
 	t.Log("Generating genesis...")
 	gen := genesis.Generate(t, genesis.Config{
 		NumValidators: 64,
-		GenesisTime:   time.Now().Add(10 * time.Second), // genesis 10s in the future
+		GenesisTime:   time.Now().Add(10 * time.Second),
 	})
 	t.Log("Genesis generated successfully")
 
 	// 3. Start EL nodes (geth as library, no P2P)
 	t.Log("Starting EL nodes...")
 	el1 := elnode.Start(t, gen.ELGenesis)
-	t.Log("EL1 started")
 	el2 := elnode.Start(t, gen.ELGenesis)
-	t.Log("EL2 started")
+	t.Log("EL nodes started")
 
 	// 4. Create QUIC-over-simnet transports for CL P2P
 	cl1Opts, _, err := quicnet.NewSimnetTransport(cl1Conn)
@@ -56,29 +53,47 @@ func TestEthereum(t *testing.T) {
 		t.Fatalf("failed to create simnet transport for CL2: %v", err)
 	}
 
-	// 5. Start CL nodes
-	t.Log("Starting CL node 1...")
+	// 5. Create bufconn pairs for validator→beacon gRPC (no TCP)
+	bc1 := valnode.NewBufconnPair()
+	bc2 := valnode.NewBufconnPair()
+
+	// 6. Start CL nodes with bufconn gRPC+HTTP listeners
+	t.Log("Starting CL nodes...")
 	_ = clnode.Start(t, clnode.Config{
 		GenesisState:  gen.CLState,
 		BeaconConfig:  gen.BeaconConfig,
 		RPCClient:     el1.Attach(),
 		Libp2pOptions: cl1Opts,
+		GRPCListener:  bc1.GRPCListener,
+		HTTPListener:  bc1.HTTPListener,
 	})
-	t.Log("CL1 started")
-
-	t.Log("Starting CL node 2...")
 	_ = clnode.Start(t, clnode.Config{
 		GenesisState:  gen.CLState,
 		BeaconConfig:  gen.BeaconConfig,
 		RPCClient:     el2.Attach(),
 		Libp2pOptions: cl2Opts,
+		GRPCListener:  bc2.GRPCListener,
+		HTTPListener:  bc2.HTTPListener,
 	})
-	t.Log("CL2 started")
+	t.Log("CL nodes started")
 
-	// 6. Wait for 2 epochs
-	// With config: 32 slots/epoch, 4s/slot = 128s/epoch
-	// 2 epochs = 256s + 10s genesis delay = ~270s
+	// 7. Start validators (32 each, interop keys, connected via bufconn)
+	t.Log("Starting validators...")
+	valnode.Start(t, bc1, valnode.Config{
+		NumValidators: 32,
+		StartIndex:    0,
+	})
+	valnode.Start(t, bc2, valnode.Config{
+		NumValidators: 32,
+		StartIndex:    32,
+	})
+	t.Log("Validators started")
+
+	// 8. Wait for 2 epochs
+	// Config: 32 slots/epoch, 4s/slot = 128s/epoch, 2 epochs = 256s + genesis delay
 	t.Log("Waiting for 2 epochs...")
 	time.Sleep(270 * time.Second)
+
+	// TODO: Assert finalized epoch agreement between nodes
 	t.Log("Ethereum network ran for 2 epochs")
 }
