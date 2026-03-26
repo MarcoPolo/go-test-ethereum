@@ -5,6 +5,8 @@ go 1.26.0
 require (
 	github.com/OffchainLabs/prysm/v7 v7.0.0
 	github.com/ethereum/go-ethereum v1.17.1
+	github.com/libp2p/go-libp2p v0.39.1
+	github.com/urfave/cli/v2 v2.27.6
 )
 
 require (
@@ -95,7 +97,6 @@ require (
 	github.com/kr/text v0.2.0 // indirect
 	github.com/libp2p/go-buffer-pool v0.1.0 // indirect
 	github.com/libp2p/go-flow-metrics v0.2.0 // indirect
-	github.com/libp2p/go-libp2p v0.39.1 // indirect
 	github.com/libp2p/go-libp2p-asn-util v0.4.1 // indirect
 	github.com/libp2p/go-libp2p-mplex v0.9.0 // indirect
 	github.com/libp2p/go-libp2p-pubsub v0.14.2 // indirect
@@ -194,7 +195,6 @@ require (
 	github.com/tklauser/go-sysconf v0.3.15 // indirect
 	github.com/tklauser/numcpus v0.10.0 // indirect
 	github.com/trailofbits/go-mutexasserts v0.0.0-20250212181730-4c2b8e9e784b // indirect
-	github.com/urfave/cli/v2 v2.27.6 // indirect
 	github.com/wealdtech/go-bytesutil v1.1.1 // indirect
 	github.com/wlynxg/anet v0.0.5 // indirect
 	github.com/xrash/smetrics v0.0.0-20240521201337-686a1a2994c1 // indirect
