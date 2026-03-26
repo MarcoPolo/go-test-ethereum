@@ -6,6 +6,9 @@ require (
 	github.com/OffchainLabs/prysm/v7 v7.0.0
 	github.com/ethereum/go-ethereum v1.17.1
 	github.com/libp2p/go-libp2p v0.39.1
+	github.com/marcopolo/simnet v0.0.5
+	github.com/multiformats/go-multiaddr v0.14.0
+	github.com/quic-go/quic-go v0.49.1-0.20250925085836-275c172fec2b
 	github.com/urfave/cli/v2 v2.27.6
 )
 
@@ -127,7 +130,6 @@ require (
 	github.com/mr-tron/base58 v1.2.0 // indirect
 	github.com/multiformats/go-base32 v0.1.0 // indirect
 	github.com/multiformats/go-base36 v0.2.0 // indirect
-	github.com/multiformats/go-multiaddr v0.14.0 // indirect
 	github.com/multiformats/go-multiaddr-dns v0.4.1 // indirect
 	github.com/multiformats/go-multiaddr-fmt v0.1.0 // indirect
 	github.com/multiformats/go-multibase v0.2.0 // indirect
@@ -176,7 +178,6 @@ require (
 	github.com/prysmaticlabs/gohashtree v0.0.5-beta // indirect
 	github.com/prysmaticlabs/prombbolt v0.0.0-20210126082820-9b7adba6db7c // indirect
 	github.com/quic-go/qpack v0.5.1 // indirect
-	github.com/quic-go/quic-go v0.49.1-0.20250925085836-275c172fec2b // indirect
 	github.com/quic-go/webtransport-go v0.8.1-0.20241018022711-4ac2c9250e66 // indirect
 	github.com/raulk/go-watchdog v1.3.0 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
