@@ -1,0 +1,9 @@
+[submodule "submodules/go-ethereum"]
+	path = submodules/go-ethereum
+	url = https://github.com/ethereum/go-ethereum.git
+[submodule "submodules/prysm"]
+	path = submodules/prysm
+	url = https://github.com/prysmaticlabs/prysm.git
+[submodule "submodules/simnet"]
+	path = submodules/simnet
+	url = https://github.com/marcopolo/simnet.git
