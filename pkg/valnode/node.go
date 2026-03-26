@@ -66,6 +66,7 @@ func (p *bufconnGRPCProvider) CurrentConn() *grpc.ClientConn {
 				return p.lis.DialContext(ctx)
 			}),
 			grpc.WithTransportCredentials(insecure.NewCredentials()),
+			grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(10*1024*1024)),
 		)
 		if err != nil {
 			return nil
