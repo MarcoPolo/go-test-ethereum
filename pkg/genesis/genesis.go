@@ -49,6 +49,7 @@ func Generate(t *testing.T, cfg Config) *Result {
 	beaconCfg.FuluForkEpoch = 0
 	// Reduce genesis delay for testing
 	beaconCfg.GenesisDelay = 0
+	beaconCfg.MinGenesisTime = uint64(cfg.GenesisTime.Unix())
 	beaconCfg.ConfigName = "minimal"
 	beaconCfg.InitializeForkSchedule()
 	params.OverrideBeaconConfig(beaconCfg)

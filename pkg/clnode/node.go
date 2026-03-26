@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/OffchainLabs/prysm/v7/beacon-chain/das"
 	"github.com/OffchainLabs/prysm/v7/beacon-chain/db/filesystem"
 	"github.com/OffchainLabs/prysm/v7/beacon-chain/execution"
 	"github.com/OffchainLabs/prysm/v7/beacon-chain/node"
@@ -100,9 +101,12 @@ func Start(t *testing.T, cfg Config) *Node {
 		node.WithExecutionChainOptions([]execution.Option{
 			execution.WithRPCClient(cfg.RPCClient),
 		}),
-		// Add genesis provider
+		// Add genesis provider and sync needs waiter
 		func(bn *node.BeaconNode) error {
 			bn.GenesisProviders = append(bn.GenesisProviders, provider)
+			bn.SyncNeedsWaiter = func() (das.SyncNeeds, error) {
+				return das.SyncNeeds{}, nil
+			}
 			return nil
 		},
 	}
