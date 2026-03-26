@@ -113,6 +113,7 @@ func Start(t *testing.T, cfg Config) *Node {
 		node.WithBlobStorage(filesystem.NewEphemeralBlobStorage(t)),
 		node.WithDataColumnStorage(filesystem.NewEphemeralDataColumnStorage(t)),
 		node.WithP2PConfig(p2pCfg),
+		node.WithSkipSignalHandler(),
 	}
 	if cfg.GRPCListener != nil {
 		opts = append(opts, node.WithGRPCListener(cfg.GRPCListener))

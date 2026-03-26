@@ -152,8 +152,9 @@ func Start(t *testing.T, bc *BufconnPair, cfg Config) {
 	t.Cleanup(cancel)
 
 	validatorService, err := client.NewValidatorService(ctx, &client.Config{
-		DB:   valDB,
-		Conn: nodeConn,
+		DB:                     valDB,
+		Conn:                   nodeConn,
+		GRPCMaxCallRecvMsgSize: 10 * 1024 * 1024, // 10MB
 		InteropKmConfig: &local.InteropKeymanagerConfig{
 			Offset:           cfg.StartIndex,
 			NumValidatorKeys: cfg.NumValidators,
