@@ -61,7 +61,7 @@ func TestEthereum(t *testing.T) {
 
 		// 6. Start CL nodes
 		t.Log("Starting CL nodes...")
-		_ = clnode.Start(t, clnode.Config{
+		cl1 := clnode.Start(t, clnode.Config{
 			GenesisState:  gen.CLState,
 			BeaconConfig:  gen.BeaconConfig,
 			RPCClient:     el1.Attach(),
@@ -69,7 +69,7 @@ func TestEthereum(t *testing.T) {
 			GRPCListener:  bc1.GRPCListener,
 			HTTPListener:  bc1.HTTPListener,
 		})
-		_ = clnode.Start(t, clnode.Config{
+		cl2 := clnode.Start(t, clnode.Config{
 			GenesisState:  gen.CLState,
 			BeaconConfig:  gen.BeaconConfig,
 			RPCClient:     el2.Attach(),
@@ -97,5 +97,10 @@ func TestEthereum(t *testing.T) {
 
 		// TODO: Assert finalized epoch agreement
 		t.Log("Ethereum network ran for 2 epochs")
+
+		// Explicitly close CL nodes before exiting synctest bubble
+		// to avoid "deadlock: main bubble goroutine has exited" panic.
+		cl1.Close()
+		cl2.Close()
 	})
 }

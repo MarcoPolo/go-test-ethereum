@@ -47,6 +47,7 @@ type Config struct {
 // Node wraps a Prysm beacon node.
 type Node struct {
 	Beacon *node.BeaconNode
+	cancel context.CancelFunc
 }
 
 // genesisProvider implements genesis.Provider using an in-memory beacon state.
@@ -141,14 +142,19 @@ func Start(t *testing.T, cfg Config) *Node {
 	if err != nil {
 		t.Fatalf("failed to create beacon node: %v", err)
 	}
-	t.Cleanup(func() { beacon.Close() })
-
 	// Start the beacon node
 	go beacon.Start()
 
 	return &Node{
 		Beacon: beacon,
+		cancel: cancel,
 	}
+}
+
+// Close stops the beacon node and cancels its context.
+func (n *Node) Close() {
+	n.cancel()
+	n.Beacon.Close()
 }
 
 // PeerInfo returns the peer information string for connecting other nodes to this one.
