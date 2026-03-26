@@ -24,6 +24,8 @@ import (
 type Config struct {
 	// GenesisState is the CL genesis beacon state (native state.BeaconState).
 	GenesisState state.BeaconState
+	// BeaconConfig is the custom beacon chain config (fork epochs, timing, etc.)
+	BeaconConfig *params.BeaconChainConfig
 	// RPCClient is the in-process RPC client connected to the paired EL node.
 	RPCClient *rpc.Client
 	// Libp2pOptions are custom libp2p options (e.g. simnet QUIC transport).
@@ -93,6 +95,14 @@ func Start(t *testing.T, cfg Config) *Node {
 	}
 
 	// Build node options
+	var configOpts []node.Option
+	if cfg.BeaconConfig != nil {
+		bcfg := cfg.BeaconConfig
+		configOpts = append(configOpts, node.WithConfigOptions(func(c *params.BeaconChainConfig) {
+			*c = *bcfg
+		}))
+	}
+
 	opts := []node.Option{
 		node.WithBlobStorage(filesystem.NewEphemeralBlobStorage(t)),
 		node.WithDataColumnStorage(filesystem.NewEphemeralDataColumnStorage(t)),
@@ -111,6 +121,7 @@ func Start(t *testing.T, cfg Config) *Node {
 		},
 	}
 
+	opts = append(configOpts, opts...)
 	beacon, err := node.New(cliCtx, cancel, nil, opts...)
 	if err != nil {
 		t.Fatalf("failed to create beacon node: %v", err)

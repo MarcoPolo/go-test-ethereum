@@ -38,8 +38,10 @@ func Generate(t *testing.T, cfg Config) *Result {
 		cfg.GenesisTime = time.Now()
 	}
 
-	// Use minimal spec config for fast epochs (8 slots/epoch, 6s slots)
-	beaconCfg := params.MinimalSpecConfig()
+	// Use mainnet config with faster timing for testing.
+	// We can't use MinimalSpecConfig() because it requires the 'minimal' build tag
+	// for SSZ field sizes (SlashingsLength, etc.) which don't compile cleanly.
+	beaconCfg := params.MainnetConfig().Copy()
 	// All forks active at genesis
 	beaconCfg.AltairForkEpoch = 0
 	beaconCfg.BellatrixForkEpoch = 0
@@ -47,10 +49,13 @@ func Generate(t *testing.T, cfg Config) *Result {
 	beaconCfg.DenebForkEpoch = 0
 	beaconCfg.ElectraForkEpoch = 0
 	beaconCfg.FuluForkEpoch = 0
-	// Reduce genesis delay for testing
+	// Reduce timing for fast testing (keep SlotsPerEpoch=32 for mainnet field param compat)
+	beaconCfg.SecondsPerSlot = 4
+	beaconCfg.SlotDurationMilliseconds = 4000
 	beaconCfg.GenesisDelay = 0
 	beaconCfg.MinGenesisTime = uint64(cfg.GenesisTime.Unix())
-	beaconCfg.ConfigName = "minimal"
+	beaconCfg.MinGenesisActiveValidatorCount = cfg.NumValidators
+	beaconCfg.ConfigName = "interop"
 	beaconCfg.InitializeForkSchedule()
 	params.OverrideBeaconConfig(beaconCfg)
 

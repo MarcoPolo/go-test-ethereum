@@ -60,6 +60,7 @@ func TestEthereum(t *testing.T) {
 	t.Log("Starting CL node 1...")
 	_ = clnode.Start(t, clnode.Config{
 		GenesisState:  gen.CLState,
+		BeaconConfig:  gen.BeaconConfig,
 		RPCClient:     el1.Attach(),
 		Libp2pOptions: cl1Opts,
 	})
@@ -68,15 +69,16 @@ func TestEthereum(t *testing.T) {
 	t.Log("Starting CL node 2...")
 	_ = clnode.Start(t, clnode.Config{
 		GenesisState:  gen.CLState,
+		BeaconConfig:  gen.BeaconConfig,
 		RPCClient:     el2.Attach(),
 		Libp2pOptions: cl2Opts,
 	})
 	t.Log("CL2 started")
 
 	// 6. Wait for 2 epochs
-	// With minimal config: 8 slots/epoch, 6s/slot = 48s/epoch
-	// 2 epochs = 96s
+	// With config: 32 slots/epoch, 4s/slot = 128s/epoch
+	// 2 epochs = 256s + 10s genesis delay = ~270s
 	t.Log("Waiting for 2 epochs...")
-	time.Sleep(100 * time.Second)
+	time.Sleep(270 * time.Second)
 	t.Log("Ethereum network ran for 2 epochs")
 }
