@@ -6,11 +6,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/OffchainLabs/prysm/v7/beacon-chain/state"
 	"github.com/OffchainLabs/prysm/v7/config/params"
 	"github.com/OffchainLabs/prysm/v7/runtime/interop"
+	"github.com/OffchainLabs/prysm/v7/runtime/version"
 	"github.com/ethereum/go-ethereum/core"
-
-	ethpb "github.com/OffchainLabs/prysm/v7/proto/prysm/v1alpha1"
 )
 
 // Config holds the genesis configuration.
@@ -22,8 +22,7 @@ type Config struct {
 // Result holds the generated genesis data for both layers.
 type Result struct {
 	ELGenesis    *core.Genesis
-	CLState      *ethpb.BeaconState
-	CLDeposits   []*ethpb.Deposit
+	CLState      state.BeaconState
 	GenesisTime  time.Time
 	BeaconConfig *params.BeaconChainConfig
 }
@@ -47,28 +46,35 @@ func Generate(t *testing.T, cfg Config) *Result {
 	beaconCfg.CapellaForkEpoch = 0
 	beaconCfg.DenebForkEpoch = 0
 	beaconCfg.ElectraForkEpoch = 0
+	beaconCfg.FuluForkEpoch = 0
 	// Reduce genesis delay for testing
 	beaconCfg.GenesisDelay = 0
+	beaconCfg.ConfigName = "minimal"
+	beaconCfg.InitializeForkSchedule()
 	params.OverrideBeaconConfig(beaconCfg)
 
-	// Generate CL genesis state with deterministic validator keys
-	genesisTimeUnix := uint64(cfg.GenesisTime.Unix())
-	clState, deposits, err := interop.GenerateGenesisState(
+	// Generate matching EL genesis
+	elGenesis := interop.GethTestnetGenesis(cfg.GenesisTime, beaconCfg)
+
+	// Get the genesis block
+	genesisBlock := elGenesis.ToBlock()
+
+	// Generate CL genesis state at Fulu fork using NewPreminedGenesis
+	clState, err := interop.NewPreminedGenesis(
 		context.Background(),
-		genesisTimeUnix,
+		cfg.GenesisTime,
 		cfg.NumValidators,
+		cfg.NumValidators, // all validators get execution credentials
+		version.Fulu,
+		genesisBlock,
 	)
 	if err != nil {
 		t.Fatalf("failed to generate CL genesis state: %v", err)
 	}
 
-	// Generate matching EL genesis
-	elGenesis := interop.GethTestnetGenesis(cfg.GenesisTime, beaconCfg)
-
 	return &Result{
 		ELGenesis:    elGenesis,
 		CLState:      clState,
-		CLDeposits:   deposits,
 		GenesisTime:  cfg.GenesisTime,
 		BeaconConfig: beaconCfg,
 	}

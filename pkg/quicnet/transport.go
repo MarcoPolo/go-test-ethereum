@@ -79,15 +79,24 @@ func NewSimnetTransport(conn *simnet.SimConn) ([]libp2p.Option, *SimnetTransport
 	// Wrap to satisfy QUICTransport interface
 	wrapped := &wrappedQUICTransport{tr: qtr}
 
+	// LendTransport requires the local addr IP to be unspecified (0.0.0.0).
+	// Save the real addr for the multiaddr, then temporarily set local addr to 0.0.0.0.
+	realAddr := conn.LocalAddr().(*net.UDPAddr)
+	unspecAddr := &net.UDPAddr{IP: net.IPv4zero, Port: realAddr.Port}
+	conn.SetLocalAddr(unspecAddr)
+
 	// Lend the transport to the ConnManager
 	doneCh, err := cm.LendTransport("udp4", wrapped, conn)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to lend transport: %w", err)
 	}
 
-	// Build the multiaddr for listening
-	addr := conn.LocalAddr().(*net.UDPAddr)
-	listenAddr, err := ma.NewMultiaddr(fmt.Sprintf("/ip4/%s/udp/%d/quic-v1", addr.IP.String(), addr.Port))
+	// Restore real addr for actual routing
+	conn.SetLocalAddr(realAddr)
+
+	// Build the multiaddr for listening using the unspecified IP
+	// (libp2p's quicreuse expects to match on 0.0.0.0:port)
+	listenAddr, err := ma.NewMultiaddr(fmt.Sprintf("/ip4/0.0.0.0/udp/%d/quic-v1", realAddr.Port))
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create multiaddr: %w", err)
 	}

@@ -5,7 +5,6 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"os"
 	"path/filepath"
 	"testing"
 
@@ -14,9 +13,7 @@ import (
 	"github.com/OffchainLabs/prysm/v7/beacon-chain/node"
 	"github.com/OffchainLabs/prysm/v7/beacon-chain/p2p"
 	"github.com/OffchainLabs/prysm/v7/beacon-chain/state"
-	statenative "github.com/OffchainLabs/prysm/v7/beacon-chain/state/state-native"
 	"github.com/OffchainLabs/prysm/v7/config/params"
-	ethpb "github.com/OffchainLabs/prysm/v7/proto/prysm/v1alpha1"
 	"github.com/ethereum/go-ethereum/rpc"
 	"github.com/libp2p/go-libp2p"
 	"github.com/urfave/cli/v2"
@@ -24,8 +21,8 @@ import (
 
 // Config holds the configuration for creating a CL node.
 type Config struct {
-	// GenesisState is the CL genesis beacon state.
-	GenesisState *ethpb.BeaconState
+	// GenesisState is the CL genesis beacon state (native state.BeaconState).
+	GenesisState state.BeaconState
 	// RPCClient is the in-process RPC client connected to the paired EL node.
 	RPCClient *rpc.Client
 	// Libp2pOptions are custom libp2p options (e.g. simnet QUIC transport).
@@ -45,11 +42,11 @@ type Node struct {
 
 // genesisProvider implements genesis.Provider using an in-memory beacon state.
 type genesisProvider struct {
-	state state.BeaconState
+	st state.BeaconState
 }
 
 func (p *genesisProvider) Genesis(_ context.Context) (state.BeaconState, error) {
-	return p.state, nil
+	return p.st, nil
 }
 
 // Start creates and returns a Prysm beacon node configured for in-process testing.
@@ -66,38 +63,17 @@ func Start(t *testing.T, cfg Config) *Node {
 		cfg.QueueSize = 600
 	}
 
-	// Convert the proto beacon state to a native state for the genesis provider.
-	nativeState, err := statenative.InitializeFromProtoUnsafePhase0(cfg.GenesisState)
-	if err != nil {
-		t.Fatalf("failed to initialize native state from proto: %v", err)
-	}
-
-	provider := &genesisProvider{state: nativeState}
-
-	// Write genesis state to SSZ file for Prysm's initialization flow.
-	genesisSSZ, err := nativeState.MarshalSSZ()
-	if err != nil {
-		t.Fatalf("failed to marshal genesis state: %v", err)
-	}
-	genesisPath := filepath.Join(cfg.DataDir, "genesis.ssz")
-	if err := os.WriteFile(genesisPath, genesisSSZ, 0644); err != nil {
-		t.Fatalf("failed to write genesis SSZ: %v", err)
-	}
+	provider := &genesisProvider{st: cfg.GenesisState}
 
 	// Build synthetic CLI context with minimal required flags.
 	app := &cli.App{}
 	set := flag.NewFlagSet("test-beacon", 0)
-	set.Bool("test-skip-pow", true, "skip pow dial")
 	set.String("datadir", cfg.DataDir, "data directory")
-	set.String("genesis-state", genesisPath, "genesis state path")
 	set.String("deposit-contract", params.BeaconConfig().DepositContractAddress, "deposit contract")
 	set.String("suggested-fee-recipient", "0x0000000000000000000000000000000000000000", "fee recipient")
 	set.Bool("no-discovery", true, "disable discovery")
 	set.String("p2p-encoding", "ssz-snappy", "p2p encoding")
 	set.Bool("disable-monitoring", true, "disable monitoring")
-	// Set interop validator flags
-	set.Uint64("interop-num-validators", 0, "number of interop validators")
-	set.Uint64("interop-start-index", 0, "interop start index")
 
 	// Create parent context
 	ctx, cancel := context.WithCancel(context.Background())
@@ -107,11 +83,11 @@ func Start(t *testing.T, cfg Config) *Node {
 
 	// Build P2P config
 	p2pCfg := &p2p.Config{
-		NoDiscovery:       true,
-		DataDir:           cfg.DataDir,
-		DiscoveryDir:      filepath.Join(cfg.DataDir, "discovery"),
-		MaxPeers:          cfg.MaxPeers,
-		QueueSize:         cfg.QueueSize,
+		NoDiscovery:         true,
+		DataDir:             cfg.DataDir,
+		DiscoveryDir:        filepath.Join(cfg.DataDir, "discovery"),
+		MaxPeers:            cfg.MaxPeers,
+		QueueSize:           cfg.QueueSize,
 		CustomLibp2pOptions: cfg.Libp2pOptions,
 	}
 
