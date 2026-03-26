@@ -57,7 +57,6 @@ func Start(t *testing.T, genesis *core.Genesis) *Node {
 	if err := stack.Start(); err != nil {
 		t.Fatalf("failed to start geth node: %v", err)
 	}
-	t.Cleanup(func() { stack.Close() })
 
 	ethService.SetSynced()
 

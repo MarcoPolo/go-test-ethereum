@@ -29,7 +29,6 @@ func TestEthereum(t *testing.T) {
 		cl1Conn := sn.NewEndpoint(cl1Addr, linkSettings)
 		cl2Conn := sn.NewEndpoint(cl2Addr, linkSettings)
 		sn.Start()
-		t.Cleanup(func() { sn.Close() })
 
 		// 2. Generate genesis
 		t.Log("Generating genesis...")
@@ -98,9 +97,15 @@ func TestEthereum(t *testing.T) {
 		// TODO: Assert finalized epoch agreement
 		t.Log("Ethereum network ran for 2 epochs")
 
-		// Explicitly close CL nodes before exiting synctest bubble
-		// to avoid "deadlock: main bubble goroutine has exited" panic.
+		// Shut down everything so all goroutines exit cleanly.
+		// synctest requires all bubble goroutines to exit.
 		cl1.Close()
 		cl2.Close()
+		el1.Stack.Close()
+		el2.Stack.Close()
+		sn.Close()
+
+		// Allow time for all goroutines to process shutdown
+		time.Sleep(30 * time.Second)
 	})
 }
