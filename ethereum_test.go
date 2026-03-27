@@ -36,7 +36,7 @@ func TestEthereum(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		// 1. Setup simnet
 		sn := &simnet.Simnet{
-			LatencyFunc: simnet.StaticLatency(1 * time.Millisecond),
+			LatencyFunc: simnet.StaticLatency(50 * time.Millisecond),
 		}
 		ls := simnet.NodeBiDiLinkSettings{
 			Downlink: simnet.LinkSettings{BitsPerSecond: 100 * simnet.Mibps},
