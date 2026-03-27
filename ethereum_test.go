@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"fmt"
+	"math/big"
 	"net"
 	"testing"
 	"testing/synctest"
@@ -14,6 +16,7 @@ import (
 	"github.com/marcopolo/go-test-ethereum/pkg/elnode"
 	"github.com/marcopolo/go-test-ethereum/pkg/genesis"
 	"github.com/marcopolo/go-test-ethereum/pkg/quicnet"
+	"github.com/marcopolo/go-test-ethereum/pkg/txspam"
 	"github.com/marcopolo/go-test-ethereum/pkg/valnode"
 	"github.com/marcopolo/simnet"
 )
@@ -142,7 +145,13 @@ func TestEthereum(t *testing.T) {
 			StartIndex:    0,
 		})
 
-		// 9. Wait for finality
+		// 9. Wait for genesis + a few slots, then start tx spammer
+		time.Sleep(20 * time.Second) // past genesis (T+10) + a couple slots
+		spamCtx, spamCancel := context.WithCancel(context.Background())
+		txspam.Start(spamCtx, t, els[0].Attach(), big.NewInt(1337), 4*time.Second)
+		t.Log("Transaction spammer started")
+
+		// 10. Wait for finality
 		t.Log("Waiting for finality...")
 		time.Sleep(800 * time.Second)
 
@@ -163,6 +172,7 @@ func TestEthereum(t *testing.T) {
 		t.Logf("SUCCESS: All %d nodes agree on finalized epoch %d", numNodes, epochs[0])
 
 		// Shutdown
+		spamCancel()
 		v.Close()
 		for _, cl := range cls {
 			cl.Close()

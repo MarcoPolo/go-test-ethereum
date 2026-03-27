@@ -3,6 +3,7 @@ package genesis
 
 import (
 	"context"
+	"math/big"
 	"testing"
 	"time"
 
@@ -10,7 +11,9 @@ import (
 	"github.com/OffchainLabs/prysm/v7/config/params"
 	"github.com/OffchainLabs/prysm/v7/runtime/interop"
 	"github.com/OffchainLabs/prysm/v7/runtime/version"
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core"
+	"github.com/ethereum/go-ethereum/core/types"
 )
 
 // Config holds the genesis configuration.
@@ -63,6 +66,14 @@ func Generate(t *testing.T, cfg Config) *Result {
 
 	// Generate matching EL genesis
 	elGenesis := interop.GethTestnetGenesis(cfg.GenesisTime, beaconCfg)
+
+	// Fund the test transaction sender account
+	// Key: b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291
+	// Address: 0x71562b71999567a775a2b8cfcdf1512e04b0a9b4 (derived from key)
+	testAddr := common.HexToAddress("0x71562b71999873DB5b286dF957af199Ec94617F7")
+	elGenesis.Alloc[testAddr] = types.Account{
+		Balance: new(big.Int).Mul(big.NewInt(1e18), big.NewInt(1_000_000)), // 1M ETH
+	}
 
 	// Get the genesis block
 	genesisBlock := elGenesis.ToBlock()
