@@ -6,6 +6,7 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/marcopolo/go-test-ethereum/pkg/clnode"
 	"github.com/marcopolo/go-test-ethereum/pkg/elnode"
 	"github.com/marcopolo/go-test-ethereum/pkg/genesis"
@@ -17,7 +18,9 @@ import (
 func TestEthereum(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		// 1. Setup simnet
-		sn := &simnet.Simnet{}
+		sn := &simnet.Simnet{
+			LatencyFunc: simnet.StaticLatency(1 * time.Millisecond),
+		}
 		linkSettings := simnet.NodeBiDiLinkSettings{
 			Downlink: simnet.LinkSettings{BitsPerSecond: 100 * simnet.Mibps},
 			Uplink:   simnet.LinkSettings{BitsPerSecond: 100 * simnet.Mibps},
@@ -77,6 +80,25 @@ func TestEthereum(t *testing.T) {
 			HTTPListener:  bc2.HTTPListener,
 		})
 		t.Log("CL nodes started")
+
+		// 6b. Connect CL peers over simnet QUIC
+		// Wait a moment for the P2P hosts to initialize
+		time.Sleep(1 * time.Second)
+		p2p1 := cl1.P2PService()
+		p2p2 := cl2.P2PService()
+		if p2p1 != nil && p2p2 != nil && p2p2.Host() != nil {
+			addrs2 := p2p2.Host().Addrs()
+			id2 := p2p2.Host().ID()
+			t.Logf("Connecting CL1 to CL2 (id=%s, addrs=%v)", id2, addrs2)
+			err = p2p1.Connect(peer.AddrInfo{ID: id2, Addrs: addrs2})
+			if err != nil {
+				t.Logf("peer connection failed: %v", err)
+			} else {
+				t.Log("CL peers connected")
+			}
+		} else {
+			t.Log("P2P services not ready, skipping peer connection")
+		}
 
 		// 7. Start validators
 		t.Log("Starting validators...")

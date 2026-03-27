@@ -4,7 +4,6 @@ package clnode
 import (
 	"context"
 	"flag"
-	"fmt"
 	"path/filepath"
 	"testing"
 
@@ -165,8 +164,11 @@ func (n *Node) Close() {
 	n.Beacon.Close()
 }
 
-// PeerInfo returns the peer information string for connecting other nodes to this one.
-func (n *Node) PeerInfo() string {
-	// TODO: implement once P2P is wired up
-	return fmt.Sprintf("peer-info-placeholder")
+// P2PService returns the P2P service from the beacon node.
+func (n *Node) P2PService() *p2p.Service {
+	var svc *p2p.Service
+	if err := n.Beacon.Services().FetchService(&svc); err != nil {
+		return nil
+	}
+	return svc
 }
