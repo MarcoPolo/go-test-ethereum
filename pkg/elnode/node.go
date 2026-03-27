@@ -129,6 +129,11 @@ type QUICDialer struct {
 
 func (d *QUICDialer) Dial(ctx context.Context, dest *enode.Node) (net.Conn, error) {
 	ep, _ := dest.TCPEndpoint()
-	addr := net.UDPAddrFromAddrPort(ep)
+	// Use net.ParseIP to get 16-byte IP form, matching simnet's address registration.
+	// net.UDPAddrFromAddrPort returns 4-byte IPs which don't match simnet's map keys.
+	addr := &net.UDPAddr{
+		IP:   net.ParseIP(ep.Addr().String()),
+		Port: int(ep.Port()),
+	}
 	return d.DialFunc(ctx, addr)
 }
