@@ -4,11 +4,7 @@ A single `go test` that runs a multi-node Ethereum PoS network (Prysm CL + go-et
 
 ## Setup
 
-Requires Go 1.26+.
-
 ```bash
-git clone <repo-url>
-cd go-test-ethereum
 git submodule update --init
 ./patches/apply.sh
 ```
@@ -18,5 +14,5 @@ The `patches/apply.sh` script checks out the upstream base commits for `go-ether
 ## Run
 
 ```bash
-go test -v -run TestEthereum -timeout 120s -count=1 .
+go test -v
 ```
