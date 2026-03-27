@@ -1,0 +1,77 @@
+From d208d1c2391520a9919a97e001babd8080d1e888 Mon Sep 17 00:00:00 2001
+From: Marco <marco@marcopolo.io>
+Date: Thu, 26 Mar 2026 20:28:14 +0000
+Subject: [PATCH 03/24] Add WithP2PConfig option for custom P2P configuration
+
+Allow injecting a pre-built P2P Config into the beacon node,
+bypassing CLI flag parsing for P2P setup. The custom config
+can include CustomLibp2pOptions for simnet transport injection.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+---
+ beacon-chain/node/node.go    | 16 ++++++++++++++++
+ beacon-chain/node/options.go | 10 ++++++++++
+ 2 files changed, 26 insertions(+)
+
+diff --git a/beacon-chain/node/node.go b/beacon-chain/node/node.go
+index 9c8b47e8de..1a140d6269 100644
+--- a/beacon-chain/node/node.go
++++ b/beacon-chain/node/node.go
+@@ -134,6 +134,7 @@ type BeaconNode struct {
+ 	lcStore                         *lightclient.Store
+ 	ConfigOptions                   []params.Option
+ 	SyncNeedsWaiter                 func() (das.SyncNeeds, error)
++	customP2PConfig                 *p2p.Config
+ }
+ 
+ // New creates a new node instance, sets up configuration options, and registers
+@@ -660,6 +661,21 @@ func parseIPNetStrings(ipWhitelist []string) ([]*net.IPNet, error) {
+ }
+ 
+ func (b *BeaconNode) registerP2P(cliCtx *cli.Context) error {
++	// If a custom P2P config was injected (e.g. for in-process testing),
++	// use it directly instead of building from CLI flags.
++	if b.customP2PConfig != nil {
++		cfg := b.customP2PConfig
++		cfg.StateNotifier = b
++		cfg.DB = b.db
++		cfg.StateGen = b.stateGen
++		cfg.ClockWaiter = b.ClockWaiter
++		svc, err := p2p.NewService(b.ctx, cfg)
++		if err != nil {
++			return err
++		}
++		return b.services.RegisterService(svc)
++	}
++
+ 	bootstrapNodeAddrs, dataDir, err := registration.P2PPreregistration(cliCtx)
+ 	if err != nil {
+ 		return errors.Wrapf(err, "could not register p2p service")
+diff --git a/beacon-chain/node/options.go b/beacon-chain/node/options.go
+index bbfa9fbce4..9d508dba4b 100644
+--- a/beacon-chain/node/options.go
++++ b/beacon-chain/node/options.go
+@@ -5,6 +5,7 @@ import (
+ 	"github.com/OffchainLabs/prysm/v7/beacon-chain/builder"
+ 	"github.com/OffchainLabs/prysm/v7/beacon-chain/db/filesystem"
+ 	"github.com/OffchainLabs/prysm/v7/beacon-chain/execution"
++	"github.com/OffchainLabs/prysm/v7/beacon-chain/p2p"
+ 	"github.com/OffchainLabs/prysm/v7/config/params"
+ )
+ 
+@@ -75,3 +76,12 @@ func WithDataColumnStorageOptions(opt ...filesystem.DataColumnStorageOption) Opt
+ 		return nil
+ 	}
+ }
++
++// WithP2PConfig sets a custom P2P config that will be used instead of
++// building one from CLI flags. Used for in-process testing with simnet.
++func WithP2PConfig(cfg *p2p.Config) Option {
++	return func(bn *BeaconNode) error {
++		bn.customP2PConfig = cfg
++		return nil
++	}
++}
+-- 
+2.43.0
+

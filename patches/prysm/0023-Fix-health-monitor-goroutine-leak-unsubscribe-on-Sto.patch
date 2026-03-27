@@ -1,0 +1,64 @@
+From 996e470a08bbf4fbce7c36fee4797fc94d8577b0 Mon Sep 17 00:00:00 2001
+From: Marco <marco@marcopolo.io>
+Date: Fri, 27 Mar 2026 06:33:53 +0000
+Subject: [PATCH 23/24] Fix health monitor goroutine leak: unsubscribe on Stop
+
+The Feed.Send blocks forever when the subscriber stops reading.
+Save the subscription and call Unsubscribe() in Stop().
+Also defer hm.Stop() in ValidatorService.Start().
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+---
+ validator/client/health_monitor.go | 8 ++++++--
+ validator/client/service.go        | 1 +
+ 2 files changed, 7 insertions(+), 2 deletions(-)
+
+diff --git a/validator/client/health_monitor.go b/validator/client/health_monitor.go
+index 3fb7cf00f2..f63a5f5a24 100644
+--- a/validator/client/health_monitor.go
++++ b/validator/client/health_monitor.go
+@@ -18,6 +18,7 @@ type healthMonitor struct {
+ 	maxFails        int
+ 	healthyCh       chan bool // emits true → healthy, false → unhealthy
+ 	healthEventFeed *event.Feed
++	sub             event.Subscription
+ 	fails           int
+ 	isHealthy       bool
+ 	sync.RWMutex
+@@ -38,7 +39,7 @@ func newHealthMonitor(
+ 		healthyCh:       make(chan bool),
+ 		healthEventFeed: new(event.Feed),
+ 	}
+-	m.healthEventFeed.Subscribe(m.healthyCh)
++	m.sub = m.healthEventFeed.Subscribe(m.healthyCh)
+ 	return m
+ }
+ 
+@@ -106,8 +107,11 @@ func (m *healthMonitor) Start() {
+ 	go m.loop()
+ }
+ 
+-// Stop terminates the monitor and closes its channel.
++// Stop terminates the monitor and unsubscribes from the feed.
+ func (m *healthMonitor) Stop() {
++	if m.sub != nil {
++		m.sub.Unsubscribe()
++	}
+ 	m.cancel()
+ }
+ 
+diff --git a/validator/client/service.go b/validator/client/service.go
+index be3d9fa357..e7a6e049cc 100644
+--- a/validator/client/service.go
++++ b/validator/client/service.go
+@@ -244,6 +244,7 @@ func (v *ValidatorService) Start() {
+ 
+ 	hm := newHealthMonitor(v.ctx, v.cancel, v.maxHealthChecks, v.validator)
+ 	hm.Start()
++	defer hm.Stop()
+ 	defer v.closeClientFunc()
+ 
+ 	for {
+-- 
+2.43.0
+

@@ -1,0 +1,52 @@
+From 4a9a01ebcd1b2f7f17a74ef5fdb6f636a374b68f Mon Sep 17 00:00:00 2001
+From: Marco <marco@marcopolo.io>
+Date: Thu, 26 Mar 2026 20:42:36 +0000
+Subject: [PATCH 06/24] Ignore duplicate Prometheus registrations across all
+ beacon services
+
+Allow multiple in-process beacon node instances without failing
+on duplicate prometheus.Register calls.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+---
+ beacon-chain/execution/prometheus.go | 6 +++++-
+ beacon-chain/node/prometheus.go      | 6 +++++-
+ 2 files changed, 10 insertions(+), 2 deletions(-)
+
+diff --git a/beacon-chain/execution/prometheus.go b/beacon-chain/execution/prometheus.go
+index 8d3160e968..d50d588aa2 100644
+--- a/beacon-chain/execution/prometheus.go
++++ b/beacon-chain/execution/prometheus.go
+@@ -107,7 +107,11 @@ func NewPowchainCollector(ctx context.Context) (*PowchainCollector, error) {
+ 		finishChan: make(chan struct{}, 1),
+ 	}
+ 	go c.latestStatsUpdateLoop()
+-	return c, prometheus.Register(c)
++	err := prometheus.Register(c)
++	if _, ok := err.(prometheus.AlreadyRegisteredError); ok {
++		err = nil
++	}
++	return c, err
+ }
+ 
+ type NopBeaconNodeStatsUpdater struct{}
+diff --git a/beacon-chain/node/prometheus.go b/beacon-chain/node/prometheus.go
+index 4431b2bdde..08574fd6ef 100644
+--- a/beacon-chain/node/prometheus.go
++++ b/beacon-chain/node/prometheus.go
+@@ -27,7 +27,11 @@ func newBeaconNodePromCollector(dbPath string) (*bcnodeCollector, error) {
+ 	if err != nil {
+ 		return nil, err
+ 	}
+-	return c, prometheus.Register(c)
++	err = prometheus.Register(c)
++	if _, ok := err.(prometheus.AlreadyRegisteredError); ok {
++		err = nil
++	}
++	return c, err
+ }
+ 
+ func (bc *bcnodeCollector) Describe(ch chan<- *prometheus.Desc) {
+-- 
+2.43.0
+

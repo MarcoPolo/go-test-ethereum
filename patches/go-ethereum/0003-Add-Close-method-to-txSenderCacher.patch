@@ -1,0 +1,31 @@
+From 108edb4912443a57ada84709b9dc0a48b1dc2ed9 Mon Sep 17 00:00:00 2001
+From: Marco <marco@marcopolo.io>
+Date: Fri, 27 Mar 2026 06:17:09 +0000
+Subject: [PATCH 3/5] Add Close method to txSenderCacher
+
+Allows stopping the sender cache goroutines during cleanup.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+---
+ core/sender_cacher.go | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/core/sender_cacher.go b/core/sender_cacher.go
+index 73bd5c85f..132d2fc49 100644
+--- a/core/sender_cacher.go
++++ b/core/sender_cacher.go
+@@ -66,6 +66,11 @@ func newTxSenderCacher(threads int) *txSenderCacher {
+ 	return cacher
+ }
+ 
++// Close stops all cache goroutines.
++func (cacher *txSenderCacher) Close() {
++	close(cacher.tasks)
++}
++
+ // cache is an infinite loop, caching transaction senders from various forms of
+ // data structures.
+ func (cacher *txSenderCacher) cache() {
+-- 
+2.43.0
+

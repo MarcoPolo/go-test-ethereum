@@ -1,0 +1,32 @@
+From 0a9f436962ec42cd3fcb0f2207691bd70b90b48c Mon Sep 17 00:00:00 2001
+From: Marco <marco@marcopolo.io>
+Date: Thu, 26 Mar 2026 20:41:29 +0000
+Subject: [PATCH 05/24] Ignore duplicate Prometheus metric registration
+
+Allow multiple in-process beacon node instances without panicking
+on duplicate prometheus.Register calls for the bolt DB collector.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+---
+ beacon-chain/db/kv/kv.go | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/beacon-chain/db/kv/kv.go b/beacon-chain/db/kv/kv.go
+index e0baac415e..1357643303 100644
+--- a/beacon-chain/db/kv/kv.go
++++ b/beacon-chain/db/kv/kv.go
+@@ -201,7 +201,10 @@ func NewKVStore(ctx context.Context, dirPath string, opts ...KVStoreOption) (*St
+ 		return nil, err
+ 	}
+ 	if err = prometheus.Register(createBoltCollector(kv.db)); err != nil {
+-		return nil, err
++		// Ignore duplicate registration errors for in-process multi-node testing.
++		if _, ok := err.(prometheus.AlreadyRegisteredError); !ok {
++			return nil, err
++		}
+ 	}
+ 	// Setup the type of block storage used depending on whether or not this is a fresh database.
+ 	if err := kv.setupBlockStorageType(ctx); err != nil {
+-- 
+2.43.0
+

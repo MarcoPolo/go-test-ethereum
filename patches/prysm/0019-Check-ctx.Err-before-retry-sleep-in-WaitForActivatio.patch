@@ -1,0 +1,30 @@
+From d787097976d981f957c06f445b0b5f7a255b2aa8 Mon Sep 17 00:00:00 2001
+From: Marco <marco@marcopolo.io>
+Date: Fri, 27 Mar 2026 00:17:33 +0000
+Subject: [PATCH 19/24] Check ctx.Err before retry sleep in WaitForActivation
+
+Prevents the validator from sleeping and retrying indefinitely
+after context cancellation during shutdown.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+---
+ validator/client/wait_for_activation.go | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/validator/client/wait_for_activation.go b/validator/client/wait_for_activation.go
+index 301a66c336..bfebaa654a 100644
+--- a/validator/client/wait_for_activation.go
++++ b/validator/client/wait_for_activation.go
+@@ -60,6 +60,9 @@ func (v *validator) WaitForActivation(ctx context.Context) error {
+ }
+ 
+ func (v *validator) retryWaitForActivation(ctx context.Context, span octrace.Span, err error, message string) error {
++	if ctx.Err() != nil {
++		return ctx.Err()
++	}
+ 	tracing.AnnotateError(span, err)
+ 	attempts := activationAttempts(ctx)
+ 	log.WithError(err).WithField("attempts", attempts).Error(message)
+-- 
+2.43.0
+

@@ -1,0 +1,202 @@
+From a973e9ff2f5479d8d735d0c1562c8bba627b358a Mon Sep 17 00:00:00 2001
+From: Marco <marco@marcopolo.io>
+Date: Thu, 26 Mar 2026 23:07:25 +0000
+Subject: [PATCH 11/24] Replace spin-wait with sync.Cond in cache
+ checkInProgress
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The spin-wait pattern (hold mutex, sleep, check condition) deadlocks
+under testing/synctest because the mutex waiter is non-durable but
+the sleep is durable — synctest won't advance time.
+
+Use sync.Cond.Wait() instead, which properly releases the lock while
+waiting and is woken by Broadcast() in MarkNotInProgress.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+---
+ beacon-chain/cache/committee.go       | 31 +++++++-----------
+ beacon-chain/cache/skip_slot_cache.go | 45 ++++++++++-----------------
+ 2 files changed, 29 insertions(+), 47 deletions(-)
+
+diff --git a/beacon-chain/cache/committee.go b/beacon-chain/cache/committee.go
+index 396ebb1e61..6277c3bf78 100644
+--- a/beacon-chain/cache/committee.go
++++ b/beacon-chain/cache/committee.go
+@@ -6,7 +6,6 @@ import (
+ 	"context"
+ 	"errors"
+ 	"sync"
+-	"time"
+ 
+ 	lruwrpr "github.com/OffchainLabs/prysm/v7/cache/lru"
+ 	"github.com/OffchainLabs/prysm/v7/config/params"
+@@ -46,6 +45,7 @@ type CommitteeCache struct {
+ 	CommitteeCache *lru.Cache
+ 	lock           sync.RWMutex
+ 	inProgress     map[string]bool
++	inProgressCond *sync.Cond
+ 	size           int
+ }
+ 
+@@ -61,6 +61,7 @@ func committeeKeyFn(obj any) (string, error) {
+ // NewCommitteesCache creates a new committee cache for storing/accessing shuffled indices of a committee.
+ func NewCommitteesCache() *CommitteeCache {
+ 	cc := &CommitteeCache{}
++	cc.inProgressCond = sync.NewCond(&cc.lock)
+ 	cc.Clear()
+ 	return cc
+ }
+@@ -229,9 +230,10 @@ func (c *CommitteeCache) MarkInProgress(seed [32]byte) error {
+ // called after put.
+ func (c *CommitteeCache) MarkNotInProgress(seed [32]byte) error {
+ 	c.lock.Lock()
+-	defer c.lock.Unlock()
+ 	s := key(seed)
+ 	delete(c.inProgress, s)
++	c.lock.Unlock()
++	c.inProgressCond.Broadcast()
+ 	return nil
+ }
+ 
+@@ -251,26 +253,17 @@ func key(seed [32]byte) string {
+ }
+ 
+ func (c *CommitteeCache) checkInProgress(ctx context.Context, seed [32]byte) error {
+-	delay := minDelay
+-	// Another identical request may be in progress already. Let's wait until
+-	// any in progress request resolves or our timeout is exceeded.
+-	for {
++	// Wait until any in-progress request for this seed completes.
++	// Uses sync.Cond instead of spin-wait to avoid holding a mutex
++	// while sleeping, which deadlocks under testing/synctest.
++	c.lock.Lock()
++	for c.inProgress[key(seed)] {
+ 		if ctx.Err() != nil {
++			c.lock.Unlock()
+ 			return ctx.Err()
+ 		}
+-
+-		c.lock.RLock()
+-		if !c.inProgress[key(seed)] {
+-			c.lock.RUnlock()
+-			break
+-		}
+-		c.lock.RUnlock()
+-
+-		// This increasing backoff is to decrease the CPU cycles while waiting
+-		// for the in progress boolean to flip to false.
+-		time.Sleep(time.Duration(delay) * time.Nanosecond)
+-		delay *= delayFactor
+-		delay = min(delay, maxDelay)
++		c.inProgressCond.Wait()
+ 	}
++	c.lock.Unlock()
+ 	return nil
+ }
+diff --git a/beacon-chain/cache/skip_slot_cache.go b/beacon-chain/cache/skip_slot_cache.go
+index 0647df1ea1..e8c15ef898 100644
+--- a/beacon-chain/cache/skip_slot_cache.go
++++ b/beacon-chain/cache/skip_slot_cache.go
+@@ -3,7 +3,6 @@ package cache
+ import (
+ 	"context"
+ 	"sync"
+-	"time"
+ 
+ 	"github.com/OffchainLabs/prysm/v7/beacon-chain/state"
+ 	lruwrpr "github.com/OffchainLabs/prysm/v7/cache/lru"
+@@ -14,7 +13,7 @@ import (
+ )
+ 
+ var (
+-	// Delay parameters
++	// Delay parameters (kept for reference, no longer used in spin-wait)
+ 	minDelay    = float64(10)        // 10 nanoseconds
+ 	maxDelay    = float64(100000000) // 0.1 second
+ 	delayFactor = 1.1
+@@ -32,18 +31,21 @@ var (
+ 
+ // SkipSlotCache is used to store the cached results of processing skip slots in transition.ProcessSlots.
+ type SkipSlotCache struct {
+-	cache      *lru.Cache
+-	lock       sync.RWMutex
+-	disabled   bool // Allow for programmatic toggling of the cache, useful during initial sync.
+-	inProgress map[[32]byte]bool
++	cache          *lru.Cache
++	lock           sync.RWMutex
++	disabled       bool // Allow for programmatic toggling of the cache, useful during initial sync.
++	inProgress     map[[32]byte]bool
++	inProgressCond *sync.Cond
+ }
+ 
+ // NewSkipSlotCache initializes the map and underlying cache.
+ func NewSkipSlotCache() *SkipSlotCache {
+-	return &SkipSlotCache{
++	c := &SkipSlotCache{
+ 		cache:      lruwrpr.New(8),
+ 		inProgress: make(map[[32]byte]bool),
+ 	}
++	c.inProgressCond = sync.NewCond(&c.lock)
++	return c
+ }
+ 
+ // Enable the skip slot cache.
+@@ -62,35 +64,22 @@ func (c *SkipSlotCache) Get(ctx context.Context, r [32]byte) (state.BeaconState,
+ 	ctx, span := trace.StartSpan(ctx, "skipSlotCache.Get")
+ 	defer span.End()
+ 	if c.disabled {
+-		// Return a miss result if cache is not enabled.
+ 		skipSlotCacheMiss.Inc()
+ 		return nil, nil
+ 	}
+ 
+-	delay := minDelay
+-
+-	// Another identical request may be in progress already. Let's wait until
+-	// any in progress request resolves or our timeout is exceeded.
++	// Wait until any in-progress request for this key completes.
+ 	inProgress := false
+-	for {
++	c.lock.Lock()
++	for c.inProgress[r] {
+ 		if ctx.Err() != nil {
++			c.lock.Unlock()
+ 			return nil, ctx.Err()
+ 		}
+-
+-		c.lock.RLock()
+-		if !c.inProgress[r] {
+-			c.lock.RUnlock()
+-			break
+-		}
+ 		inProgress = true
+-		c.lock.RUnlock()
+-
+-		// This increasing backoff is to decrease the CPU cycles while waiting
+-		// for the in progress boolean to flip to false.
+-		time.Sleep(time.Duration(delay) * time.Nanosecond)
+-		delay *= delayFactor
+-		delay = min(delay, maxDelay)
++		c.inProgressCond.Wait()
+ 	}
++	c.lock.Unlock()
+ 	span.SetAttributes(trace.BoolAttribute("inProgress", inProgress))
+ 
+ 	item, exists := c.cache.Get(r)
+@@ -122,9 +111,9 @@ func (c *SkipSlotCache) MarkInProgress(r [32]byte) error {
+ // called after put.
+ func (c *SkipSlotCache) MarkNotInProgress(r [32]byte) {
+ 	c.lock.Lock()
+-	defer c.lock.Unlock()
+-
+ 	delete(c.inProgress, r)
++	c.lock.Unlock()
++	c.inProgressCond.Broadcast()
+ }
+ 
+ // Put the response in the cache.
+-- 
+2.43.0
+

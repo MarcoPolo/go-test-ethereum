@@ -1,0 +1,90 @@
+From a75970726dba49a4540b835d6b51e114dcfef252 Mon Sep 17 00:00:00 2001
+From: Marco <marco@marcopolo.io>
+Date: Thu, 26 Mar 2026 20:25:02 +0000
+Subject: [PATCH 01/24] Add WithRPCClient option for in-process execution
+ client
+
+Allow injecting a pre-built RPCClient into the execution service,
+bypassing HTTP dial and connection polling. Used for in-process
+testing where geth runs in the same process.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+---
+ beacon-chain/execution/options.go | 11 +++++++++++
+ beacon-chain/execution/service.go | 33 ++++++++++++++++++-------------
+ 2 files changed, 30 insertions(+), 14 deletions(-)
+
+diff --git a/beacon-chain/execution/options.go b/beacon-chain/execution/options.go
+index e7918b1c1b..11dc8f4759 100644
+--- a/beacon-chain/execution/options.go
++++ b/beacon-chain/execution/options.go
+@@ -132,3 +132,14 @@ func WithGraffitiInfo(g *GraffitiInfo) Option {
+ 		return nil
+ 	}
+ }
++
++// WithRPCClient injects a pre-built RPC client for the execution service,
++// bypassing the normal HTTP dial in setupExecutionClientConnections.
++// This is used for in-process testing where the EL node runs in the same process.
++func WithRPCClient(client RPCClient) Option {
++	return func(s *Service) error {
++		s.rpcClient = client
++		s.connectedETH1 = true
++		return nil
++	}
++}
+diff --git a/beacon-chain/execution/service.go b/beacon-chain/execution/service.go
+index d9b095ade4..8411593384 100644
+--- a/beacon-chain/execution/service.go
++++ b/beacon-chain/execution/service.go
+@@ -221,20 +221,23 @@ func NewService(ctx context.Context, opts ...Option) (*Service, error) {
+ 
+ // Start the powchain service's main event loop.
+ func (s *Service) Start() {
+-	if err := s.setupExecutionClientConnections(s.ctx, s.cfg.currHttpEndpoint); err != nil {
+-		log.WithError(err).Error("Could not connect to execution endpoint")
+-	}
+-	// If the chain has not started already and we don't have access to eth1 nodes, we will not be
+-	// able to generate the genesis state.
+-	if !s.chainStartData.Chainstarted && s.cfg.currHttpEndpoint.Url == "" {
+-		// check for genesis state before shutting down the node,
+-		// if a genesis state exists, we can continue on.
+-		genState, err := s.cfg.beaconDB.GenesisState(s.ctx)
+-		if err != nil {
+-			log.Fatal(err)
++	// If an RPC client was injected via WithRPCClient, skip connection setup.
++	if !s.connectedETH1 {
++		if err := s.setupExecutionClientConnections(s.ctx, s.cfg.currHttpEndpoint); err != nil {
++			log.WithError(err).Error("Could not connect to execution endpoint")
+ 		}
+-		if genState == nil || genState.IsNil() {
+-			log.Fatal("cannot create genesis state: no eth1 http endpoint defined")
++		// If the chain has not started already and we don't have access to eth1 nodes, we will not be
++		// able to generate the genesis state.
++		if !s.chainStartData.Chainstarted && s.cfg.currHttpEndpoint.Url == "" {
++			// check for genesis state before shutting down the node,
++			// if a genesis state exists, we can continue on.
++			genState, err := s.cfg.beaconDB.GenesisState(s.ctx)
++			if err != nil {
++				log.Fatal(err)
++			}
++			if genState == nil || genState.IsNil() {
++				log.Fatal("cannot create genesis state: no eth1 http endpoint defined")
++			}
+ 		}
+ 	}
+ 
+@@ -248,7 +251,9 @@ func (s *Service) Start() {
+ 	s.isRunning = true
+ 
+ 	// Poll the execution client connection and fallback if errors occur.
+-	s.pollConnectionStatus(s.ctx)
++	if !s.connectedETH1 {
++		s.pollConnectionStatus(s.ctx)
++	}
+ 
+ 	go s.run(s.ctx.Done())
+ }
+-- 
+2.43.0
+

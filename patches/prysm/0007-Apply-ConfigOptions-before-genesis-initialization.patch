@@ -1,0 +1,35 @@
+From 07dff9b16d00e163b402279b8a650c87e4eace7e Mon Sep 17 00:00:00 2001
+From: Marco <marco@marcopolo.io>
+Date: Thu, 26 Mar 2026 20:56:14 +0000
+Subject: [PATCH 07/24] Apply ConfigOptions before genesis initialization
+
+Move config option application before genesis.Initialize() so that
+ConfigName and other settings are correct when checking embedded
+genesis data. Prevents mainnet embedded genesis from being used
+when custom config is provided.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+---
+ beacon-chain/node/node.go | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/beacon-chain/node/node.go b/beacon-chain/node/node.go
+index 1a140d6269..f75e393bb0 100644
+--- a/beacon-chain/node/node.go
++++ b/beacon-chain/node/node.go
+@@ -205,6 +205,12 @@ func New(cliCtx *cli.Context, cancel context.CancelFunc, optFuncs []func(*cli.Co
+ 	if err := dbClearer.clearGenesis(dataDir); err != nil {
+ 		return nil, errors.Wrap(err, "could not clear genesis state")
+ 	}
++	// Apply config options before genesis initialization so that ConfigName
++	// and other settings are correct when checking embedded genesis data.
++	if len(beacon.ConfigOptions) > 0 {
++		params.BeaconConfig().ApplyOptions(beacon.ConfigOptions...)
++		params.BeaconConfig().InitializeForkSchedule()
++	}
+ 	providers := append(beacon.GenesisProviders, kv.NewLegacyGenesisProvider(kvdb))
+ 	if err := genesis.Initialize(ctx, dataDir, providers...); err != nil {
+ 		return nil, errors.Wrap(err, "could not initialize genesis state")
+-- 
+2.43.0
+

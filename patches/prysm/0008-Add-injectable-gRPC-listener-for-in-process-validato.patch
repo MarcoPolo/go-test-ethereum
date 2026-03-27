@@ -1,0 +1,104 @@
+From e272daf781bd0e940372c2194d6ee3170aa97ee1 Mon Sep 17 00:00:00 2001
+From: Marco <marco@marcopolo.io>
+Date: Thu, 26 Mar 2026 22:02:48 +0000
+Subject: [PATCH 08/24] Add injectable gRPC listener for in-process validator
+ connection
+
+Allow injecting a custom net.Listener into the RPC service via
+WithGRPCListener option, bypassing the default TCP listener.
+Used with bufconn for in-process testing without TCP.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+---
+ beacon-chain/node/node.go    |  2 ++
+ beacon-chain/node/options.go | 11 +++++++++++
+ beacon-chain/rpc/service.go  | 19 +++++++++++++------
+ 3 files changed, 26 insertions(+), 6 deletions(-)
+
+diff --git a/beacon-chain/node/node.go b/beacon-chain/node/node.go
+index f75e393bb0..2e5fdc28ae 100644
+--- a/beacon-chain/node/node.go
++++ b/beacon-chain/node/node.go
+@@ -135,6 +135,7 @@ type BeaconNode struct {
+ 	ConfigOptions                   []params.Option
+ 	SyncNeedsWaiter                 func() (das.SyncNeeds, error)
+ 	customP2PConfig                 *p2p.Config
++	GRPCListener                    net.Listener
+ }
+ 
+ // New creates a new node instance, sets up configuration options, and registers
+@@ -1055,6 +1056,7 @@ func (b *BeaconNode) registerRPCService(router *http.ServeMux) error {
+ 		PayloadIDCache:                   b.payloadIDCache,
+ 		LCStore:                          b.lcStore,
+ 		GraffitiInfo:                     web3Service.GraffitiInfo(),
++		Listener:                         b.GRPCListener,
+ 	})
+ 
+ 	return b.services.RegisterService(rpcService)
+diff --git a/beacon-chain/node/options.go b/beacon-chain/node/options.go
+index 9d508dba4b..40ed2db0f1 100644
+--- a/beacon-chain/node/options.go
++++ b/beacon-chain/node/options.go
+@@ -1,6 +1,8 @@
+ package node
+ 
+ import (
++	"net"
++
+ 	"github.com/OffchainLabs/prysm/v7/beacon-chain/blockchain"
+ 	"github.com/OffchainLabs/prysm/v7/beacon-chain/builder"
+ 	"github.com/OffchainLabs/prysm/v7/beacon-chain/db/filesystem"
+@@ -85,3 +87,12 @@ func WithP2PConfig(cfg *p2p.Config) Option {
+ 		return nil
+ 	}
+ }
++
++// WithGRPCListener injects a custom net.Listener for the gRPC server,
++// bypassing the default TCP listener. Used with bufconn for in-process testing.
++func WithGRPCListener(lis net.Listener) Option {
++	return func(bn *BeaconNode) error {
++		bn.GRPCListener = lis
++		return nil
++	}
++}
+diff --git a/beacon-chain/rpc/service.go b/beacon-chain/rpc/service.go
+index 3335c38320..38e1db5afd 100644
+--- a/beacon-chain/rpc/service.go
++++ b/beacon-chain/rpc/service.go
+@@ -132,6 +132,8 @@ type Config struct {
+ 	PayloadIDCache                   *cache.PayloadIDCache
+ 	LCStore                          *lightClient.Store
+ 	GraffitiInfo                     *execution.GraffitiInfo
++	// Listener allows injecting a custom net.Listener (e.g. bufconn) instead of TCP.
++	Listener                         net.Listener
+ }
+ 
+ // NewService instantiates a new RPC service instance that will
+@@ -146,13 +148,18 @@ func NewService(ctx context.Context, cfg *Config) *Service {
+ 		connectedRPCClients: make(map[net.Addr]bool),
+ 	}
+ 
+-	address := net.JoinHostPort(s.cfg.Host, s.cfg.Port)
+-	lis, err := net.Listen("tcp", address)
+-	if err != nil {
+-		log.WithError(err).Errorf("Could not listen to port in Start() %s", address)
++	if s.cfg.Listener != nil {
++		s.listener = s.cfg.Listener
++		log.WithField("address", s.listener.Addr().String()).Info("Beacon chain gRPC server using injected listener")
++	} else {
++		address := net.JoinHostPort(s.cfg.Host, s.cfg.Port)
++		lis, err := net.Listen("tcp", address)
++		if err != nil {
++			log.WithError(err).Errorf("Could not listen to port in Start() %s", address)
++		}
++		s.listener = lis
++		log.WithField("address", address).Info("Beacon chain gRPC server listening")
+ 	}
+-	s.listener = lis
+-	log.WithField("address", address).Info("Beacon chain gRPC server listening")
+ 
+ 	opts := []grpc.ServerOption{
+ 		grpc.StatsHandler(otelgrpc.NewServerHandler()),
+-- 
+2.43.0
+

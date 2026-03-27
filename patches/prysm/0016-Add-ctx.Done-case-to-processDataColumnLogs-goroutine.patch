@@ -1,0 +1,29 @@
+From eb9a8f8a71def595f7faecdd5162012795deb823 Mon Sep 17 00:00:00 2001
+From: Marco <marco@marcopolo.io>
+Date: Thu, 26 Mar 2026 23:20:29 +0000
+Subject: [PATCH 16/24] Add ctx.Done case to processDataColumnLogs goroutine
+
+The goroutine had no shutdown path, leaking on process exit.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+---
+ beacon-chain/sync/validate_data_column.go | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/beacon-chain/sync/validate_data_column.go b/beacon-chain/sync/validate_data_column.go
+index ac26afa352..5b21bf0b6d 100644
+--- a/beacon-chain/sync/validate_data_column.go
++++ b/beacon-chain/sync/validate_data_column.go
+@@ -305,6 +305,9 @@ func (s *Service) processDataColumnLogs() {
+ 			cols := slotStats[col.root]
+ 			cols = append(cols, col)
+ 			slotStats[col.root] = cols
++		case <-s.ctx.Done():
++			ticker.Stop()
++			return
+ 		case <-ticker.C:
+ 			for root, columns := range slotStats {
+ 				indices := make([]uint64, 0, fieldparams.NumberOfColumns)
+-- 
+2.43.0
+

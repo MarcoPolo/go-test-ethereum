@@ -1,0 +1,260 @@
+From 108ecaa9ec686def11b1f88d59890e0b89e4205a Mon Sep 17 00:00:00 2001
+From: Marco <marco@marcopolo.io>
+Date: Fri, 27 Mar 2026 06:21:10 +0000
+Subject: [PATCH 4/5] Export NewConsensusAPIWithoutHeartbeat, add Close to
+ sender cacher
+
+- Export the heartbeat-free ConsensusAPI constructor for testing
+- Add Close() to txSenderCacher to stop background goroutines
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+---
+ eth/catalyst/api.go              |  8 +++---
+ eth/catalyst/api_test.go         | 46 ++++++++++++++++----------------
+ eth/catalyst/simulated_beacon.go |  2 +-
+ 3 files changed, 28 insertions(+), 28 deletions(-)
+
+diff --git a/eth/catalyst/api.go b/eth/catalyst/api.go
+index 8a4aced04..d12aa39af 100644
+--- a/eth/catalyst/api.go
++++ b/eth/catalyst/api.go
+@@ -128,15 +128,15 @@ type ConsensusAPI struct {
+ // The underlying blockchain needs to have a valid terminal total difficulty set.
+ //
+ // This function creates a long-lived object with an attached background thread.
+-// For testing or other short-term use cases, please use newConsensusAPIWithoutHeartbeat.
++// For testing or other short-term use cases, please use NewConsensusAPIWithoutHeartbeat.
+ func NewConsensusAPI(eth *eth.Ethereum) *ConsensusAPI {
+-	api := newConsensusAPIWithoutHeartbeat(eth)
++	api := NewConsensusAPIWithoutHeartbeat(eth)
+ 	go api.heartbeat()
+ 	return api
+ }
+ 
+-// newConsensusAPIWithoutHeartbeat creates a new consensus api for the SimulatedBeacon Node.
+-func newConsensusAPIWithoutHeartbeat(eth *eth.Ethereum) *ConsensusAPI {
++// NewConsensusAPIWithoutHeartbeat creates a new consensus api for the SimulatedBeacon Node.
++func NewConsensusAPIWithoutHeartbeat(eth *eth.Ethereum) *ConsensusAPI {
+ 	if eth.BlockChain().Config().TerminalTotalDifficulty == nil {
+ 		log.Warn("Engine API started but chain not configured for merge yet")
+ 	}
+diff --git a/eth/catalyst/api_test.go b/eth/catalyst/api_test.go
+index d126c362f..0bfa40843 100644
+--- a/eth/catalyst/api_test.go
++++ b/eth/catalyst/api_test.go
+@@ -116,7 +116,7 @@ func TestEth2AssembleBlock(t *testing.T) {
+ 	n, ethservice := startEthService(t, genesis, blocks)
+ 	defer n.Close()
+ 
+-	api := newConsensusAPIWithoutHeartbeat(ethservice)
++	api := NewConsensusAPIWithoutHeartbeat(ethservice)
+ 	signer := types.NewEIP155Signer(ethservice.BlockChain().Config().ChainID)
+ 	tx, err := types.SignTx(types.NewTransaction(uint64(10), blocks[9].Coinbase(), big.NewInt(1000), params.TxGas, big.NewInt(params.InitialBaseFee), nil), signer, testKey)
+ 	if err != nil {
+@@ -155,7 +155,7 @@ func TestEth2AssembleBlockWithAnotherBlocksTxs(t *testing.T) {
+ 	n, ethservice := startEthService(t, genesis, blocks[:9])
+ 	defer n.Close()
+ 
+-	api := newConsensusAPIWithoutHeartbeat(ethservice)
++	api := NewConsensusAPIWithoutHeartbeat(ethservice)
+ 
+ 	// Put the 10th block's tx in the pool and produce a new block
+ 	txs := blocks[9].Transactions()
+@@ -177,7 +177,7 @@ func TestEth2PrepareAndGetPayload(t *testing.T) {
+ 	n, ethservice := startEthService(t, genesis, blocks[:9])
+ 	defer n.Close()
+ 
+-	api := newConsensusAPIWithoutHeartbeat(ethservice)
++	api := NewConsensusAPIWithoutHeartbeat(ethservice)
+ 
+ 	// Put the 10th block's tx in the pool and produce a new block
+ 	txs := blocks[9].Transactions()
+@@ -244,7 +244,7 @@ func TestInvalidPayloadTimestamp(t *testing.T) {
+ 	defer n.Close()
+ 
+ 	var (
+-		api    = newConsensusAPIWithoutHeartbeat(ethservice)
++		api    = NewConsensusAPIWithoutHeartbeat(ethservice)
+ 		parent = ethservice.BlockChain().CurrentBlock()
+ 	)
+ 	tests := []struct {
+@@ -286,7 +286,7 @@ func TestEth2NewBlock(t *testing.T) {
+ 	defer n.Close()
+ 
+ 	var (
+-		api    = newConsensusAPIWithoutHeartbeat(ethservice)
++		api    = NewConsensusAPIWithoutHeartbeat(ethservice)
+ 		parent = preMergeBlocks[len(preMergeBlocks)-1]
+ 
+ 		// This EVM code generates a log when the contract is created.
+@@ -488,7 +488,7 @@ func TestFullAPI(t *testing.T) {
+ }
+ 
+ func setupBlocks(t *testing.T, ethservice *eth.Ethereum, n int, parent *types.Header, callback func(parent *types.Header), withdrawals [][]*types.Withdrawal, beaconRoots []common.Hash) []*types.Header {
+-	api := newConsensusAPIWithoutHeartbeat(ethservice)
++	api := NewConsensusAPIWithoutHeartbeat(ethservice)
+ 	var blocks []*types.Header
+ 	for i := 0; i < n; i++ {
+ 		callback(parent)
+@@ -536,7 +536,7 @@ func TestExchangeTransitionConfig(t *testing.T) {
+ 	defer n.Close()
+ 
+ 	// invalid ttd
+-	api := newConsensusAPIWithoutHeartbeat(ethservice)
++	api := NewConsensusAPIWithoutHeartbeat(ethservice)
+ 	config := engine.TransitionConfigurationV1{
+ 		TerminalTotalDifficulty: (*hexutil.Big)(big.NewInt(0)),
+ 		TerminalBlockHash:       common.Hash{},
+@@ -597,7 +597,7 @@ func TestNewPayloadOnInvalidChain(t *testing.T) {
+ 	defer n.Close()
+ 
+ 	var (
+-		api    = newConsensusAPIWithoutHeartbeat(ethservice)
++		api    = NewConsensusAPIWithoutHeartbeat(ethservice)
+ 		parent = ethservice.BlockChain().CurrentBlock()
+ 		signer = types.LatestSigner(ethservice.BlockChain().Config())
+ 		// This EVM code generates a log when the contract is created.
+@@ -700,7 +700,7 @@ func TestEmptyBlocks(t *testing.T) {
+ 	defer n.Close()
+ 
+ 	commonAncestor := ethservice.BlockChain().CurrentBlock()
+-	api := newConsensusAPIWithoutHeartbeat(ethservice)
++	api := NewConsensusAPIWithoutHeartbeat(ethservice)
+ 
+ 	// Setup 10 blocks on the canonical chain
+ 	setupBlocks(t, ethservice, 10, commonAncestor, func(parent *types.Header) {}, nil, nil)
+@@ -826,8 +826,8 @@ func TestTrickRemoteBlockCache(t *testing.T) {
+ 	}
+ 	nodeA.Server().AddPeer(nodeB.Server().Self())
+ 	nodeB.Server().AddPeer(nodeA.Server().Self())
+-	apiA := newConsensusAPIWithoutHeartbeat(ethserviceA)
+-	apiB := newConsensusAPIWithoutHeartbeat(ethserviceB)
++	apiA := NewConsensusAPIWithoutHeartbeat(ethserviceA)
++	apiB := NewConsensusAPIWithoutHeartbeat(ethserviceB)
+ 
+ 	commonAncestor := ethserviceA.BlockChain().CurrentBlock()
+ 
+@@ -884,7 +884,7 @@ func TestInvalidBloom(t *testing.T) {
+ 	defer n.Close()
+ 
+ 	commonAncestor := ethservice.BlockChain().CurrentBlock()
+-	api := newConsensusAPIWithoutHeartbeat(ethservice)
++	api := NewConsensusAPIWithoutHeartbeat(ethservice)
+ 
+ 	// Setup 10 blocks on the canonical chain
+ 	setupBlocks(t, ethservice, 10, commonAncestor, func(parent *types.Header) {}, nil, nil)
+@@ -910,7 +910,7 @@ func TestSimultaneousNewBlock(t *testing.T) {
+ 	defer n.Close()
+ 
+ 	var (
+-		api    = newConsensusAPIWithoutHeartbeat(ethservice)
++		api    = NewConsensusAPIWithoutHeartbeat(ethservice)
+ 		parent = preMergeBlocks[len(preMergeBlocks)-1]
+ 	)
+ 	for i := 0; i < 10; i++ {
+@@ -1000,7 +1000,7 @@ func TestWithdrawals(t *testing.T) {
+ 	n, ethservice := startEthService(t, genesis, blocks)
+ 	defer n.Close()
+ 
+-	api := newConsensusAPIWithoutHeartbeat(ethservice)
++	api := NewConsensusAPIWithoutHeartbeat(ethservice)
+ 
+ 	// 10: Build Shanghai block with no withdrawals.
+ 	parent := ethservice.BlockChain().CurrentHeader()
+@@ -1117,7 +1117,7 @@ func TestNilWithdrawals(t *testing.T) {
+ 	n, ethservice := startEthService(t, genesis, blocks)
+ 	defer n.Close()
+ 
+-	api := newConsensusAPIWithoutHeartbeat(ethservice)
++	api := NewConsensusAPIWithoutHeartbeat(ethservice)
+ 	parent := ethservice.BlockChain().CurrentHeader()
+ 	aa := common.Address{0xaa}
+ 
+@@ -1318,7 +1318,7 @@ func allBodies(blocks []*types.Block) []*types.Body {
+ 
+ func TestGetBlockBodiesByHash(t *testing.T) {
+ 	node, eth, blocks := setupBodies(t)
+-	api := newConsensusAPIWithoutHeartbeat(eth)
++	api := NewConsensusAPIWithoutHeartbeat(eth)
+ 	defer node.Close()
+ 
+ 	tests := []struct {
+@@ -1374,7 +1374,7 @@ func TestGetBlockBodiesByHash(t *testing.T) {
+ 
+ func TestGetBlockBodiesByRange(t *testing.T) {
+ 	node, eth, blocks := setupBodies(t)
+-	api := newConsensusAPIWithoutHeartbeat(eth)
++	api := NewConsensusAPIWithoutHeartbeat(eth)
+ 	defer node.Close()
+ 
+ 	tests := []struct {
+@@ -1455,7 +1455,7 @@ func TestGetBlockBodiesByRange(t *testing.T) {
+ 
+ func TestGetBlockBodiesByRangeInvalidParams(t *testing.T) {
+ 	node, eth, _ := setupBodies(t)
+-	api := newConsensusAPIWithoutHeartbeat(eth)
++	api := NewConsensusAPIWithoutHeartbeat(eth)
+ 	defer node.Close()
+ 	tests := []struct {
+ 		start hexutil.Uint64
+@@ -1567,7 +1567,7 @@ func TestParentBeaconBlockRoot(t *testing.T) {
+ 	n, ethservice := startEthService(t, genesis, blocks)
+ 	defer n.Close()
+ 
+-	api := newConsensusAPIWithoutHeartbeat(ethservice)
++	api := NewConsensusAPIWithoutHeartbeat(ethservice)
+ 
+ 	// 11: Build Shanghai block with no withdrawals.
+ 	parent := ethservice.BlockChain().CurrentHeader()
+@@ -1650,7 +1650,7 @@ func TestWitnessCreationAndConsumption(t *testing.T) {
+ 	n, ethservice := startEthService(t, genesis, blocks[:9])
+ 	defer n.Close()
+ 
+-	api := newConsensusAPIWithoutHeartbeat(ethservice)
++	api := NewConsensusAPIWithoutHeartbeat(ethservice)
+ 
+ 	// Put the 10th block's tx in the pool and produce a new block
+ 	txs := blocks[9].Transactions()
+@@ -1742,7 +1742,7 @@ func TestGetClientVersion(t *testing.T) {
+ 	n, ethservice := startEthService(t, genesis, preMergeBlocks)
+ 	defer n.Close()
+ 
+-	api := newConsensusAPIWithoutHeartbeat(ethservice)
++	api := NewConsensusAPIWithoutHeartbeat(ethservice)
+ 	info := engine.ClientVersionV1{
+ 		Code:    "TT",
+ 		Name:    "test",
+@@ -1913,7 +1913,7 @@ func newGetBlobEnv(t testing.TB, version byte) (*node.Node, *ConsensusAPI) {
+ 	tx3 := makeMultiBlobTx(&config, 0, 2, 4, key3, version) // blob[4, 6)
+ 	ethServ.TxPool().Add([]*types.Transaction{tx1, tx2, tx3}, true)
+ 
+-	api := newConsensusAPIWithoutHeartbeat(ethServ)
++	api := NewConsensusAPIWithoutHeartbeat(ethServ)
+ 	return n, api
+ }
+ 
+@@ -2007,7 +2007,7 @@ func TestGetBlobsV1AfterOsakaFork(t *testing.T) {
+ 	defer n.Close()
+ 
+ 	var engineErr *engine.EngineAPIError
+-	api := newConsensusAPIWithoutHeartbeat(ethServ)
++	api := NewConsensusAPIWithoutHeartbeat(ethServ)
+ 	_, err := api.GetBlobsV1([]common.Hash{testrand.Hash()})
+ 	if !errors.As(err, &engineErr) {
+ 		t.Fatalf("Unexpected error: %T", err)
+diff --git a/eth/catalyst/simulated_beacon.go b/eth/catalyst/simulated_beacon.go
+index 8a77cd8ab..2d5bd5bb6 100644
+--- a/eth/catalyst/simulated_beacon.go
++++ b/eth/catalyst/simulated_beacon.go
+@@ -121,7 +121,7 @@ func NewSimulatedBeacon(period uint64, feeRecipient common.Address, eth *eth.Eth
+ 		SafeBlockHash:      block.Hash(),
+ 		FinalizedBlockHash: block.Hash(),
+ 	}
+-	engineAPI := newConsensusAPIWithoutHeartbeat(eth)
++	engineAPI := NewConsensusAPIWithoutHeartbeat(eth)
+ 
+ 	// if genesis block, send forkchoiceUpdated to trigger transition to PoS
+ 	if block.Number.Sign() == 0 {
+-- 
+2.43.0
+

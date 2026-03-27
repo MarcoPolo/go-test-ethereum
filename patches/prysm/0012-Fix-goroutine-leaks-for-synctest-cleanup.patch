@@ -1,0 +1,84 @@
+From c43d4b37c4805e41ba4214f418a1ee10572cca9a Mon Sep 17 00:00:00 2001
+From: Marco <marco@marcopolo.io>
+Date: Thu, 26 Mar 2026 23:11:58 +0000
+Subject: [PATCH 12/24] Fix goroutine leaks for synctest cleanup
+
+- Close libp2p host in P2P service Stop()
+- Disable go-cache janitor goroutines (cleanup interval = 0)
+- Replace spin-wait with sync.Cond in committee and skip slot caches
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+---
+ beacon-chain/cache/subnet_ids.go              | 2 +-
+ beacon-chain/cache/sync_subnet_ids.go         | 2 +-
+ beacon-chain/operations/attestations/kv/kv.go | 2 +-
+ beacon-chain/p2p/service.go                   | 7 ++++++-
+ 4 files changed, 9 insertions(+), 4 deletions(-)
+
+diff --git a/beacon-chain/cache/subnet_ids.go b/beacon-chain/cache/subnet_ids.go
+index fd98a7972d..e166ff6352 100644
+--- a/beacon-chain/cache/subnet_ids.go
++++ b/beacon-chain/cache/subnet_ids.go
+@@ -34,7 +34,7 @@ func newSubnetIDs() *subnetIDs {
+ 	aggregatorCache := lruwrpr.New(cacheSize)
+ 	epochDuration := time.Duration(params.BeaconConfig().SlotsPerEpoch.Mul(params.BeaconConfig().SecondsPerSlot))
+ 	subLength := epochDuration * time.Duration(params.BeaconConfig().EpochsPerRandomSubnetSubscription)
+-	persistentCache := cache.New(subLength*time.Second, epochDuration*time.Second)
++	persistentCache := cache.New(subLength*time.Second, 0)
+ 	return &subnetIDs{attester: attesterCache, aggregator: aggregatorCache, persistentSubnets: persistentCache}
+ }
+ 
+diff --git a/beacon-chain/cache/sync_subnet_ids.go b/beacon-chain/cache/sync_subnet_ids.go
+index f36df72170..deaa878c12 100644
+--- a/beacon-chain/cache/sync_subnet_ids.go
++++ b/beacon-chain/cache/sync_subnet_ids.go
+@@ -24,7 +24,7 @@ func newSyncSubnetIDs() *syncSubnetIDs {
+ 	epochDuration := time.Duration(params.BeaconConfig().SlotsPerEpoch.Mul(params.BeaconConfig().SecondsPerSlot))
+ 	// Set the default duration of a sync subnet index as the whole sync committee period.
+ 	subLength := epochDuration * time.Duration(params.BeaconConfig().EpochsPerSyncCommitteePeriod)
+-	persistentCache := cache.New(subLength*time.Second, epochDuration*time.Second)
++	persistentCache := cache.New(subLength*time.Second, 0)
+ 	return &syncSubnetIDs{sCommittee: persistentCache}
+ }
+ 
+diff --git a/beacon-chain/operations/attestations/kv/kv.go b/beacon-chain/operations/attestations/kv/kv.go
+index 1c4103c915..aa4e53ce59 100644
+--- a/beacon-chain/operations/attestations/kv/kv.go
++++ b/beacon-chain/operations/attestations/kv/kv.go
+@@ -32,7 +32,7 @@ type AttCaches struct {
+ // various kind of attestations.
+ func NewAttCaches() *AttCaches {
+ 	secsInEpoch := time.Duration(params.BeaconConfig().SlotsPerEpoch.Mul(params.BeaconConfig().SecondsPerSlot))
+-	c := cache.New(2*secsInEpoch*time.Second, 2*secsInEpoch*time.Second)
++	c := cache.New(2*secsInEpoch*time.Second, 0)
+ 	pool := &AttCaches{
+ 		unAggregatedAtt: make(map[attestation.Id]ethpb.Att),
+ 		aggregatedAtt:   make(map[attestation.Id][]ethpb.Att),
+diff --git a/beacon-chain/p2p/service.go b/beacon-chain/p2p/service.go
+index 17bd0d9c25..ff5a952bd7 100644
+--- a/beacon-chain/p2p/service.go
++++ b/beacon-chain/p2p/service.go
+@@ -143,7 +143,7 @@ func NewService(ctx context.Context, cfg *Config) (*Service, error) {
+ 		isPreGenesis:          true,
+ 		joinedTopics:          make(map[string]*pubsub.Topic, len(gossipTopicMappings)),
+ 		subnetsLock:           make(map[uint64]*sync.RWMutex),
+-		peerDisconnectionTime: cache.New(1*time.Second, 1*time.Minute),
++		peerDisconnectionTime: cache.New(1*time.Second, 0),
+ 		custodyInfoSet:        make(chan struct{}),
+ 	}
+ 
+@@ -314,6 +314,11 @@ func (s *Service) Stop() error {
+ 	if s.dv5Listener != nil {
+ 		s.dv5Listener.Close()
+ 	}
++	if s.host != nil {
++		if err := s.host.Close(); err != nil {
++			log.WithError(err).Error("Failed to close libp2p host")
++		}
++	}
+ 	return nil
+ }
+ 
+-- 
+2.43.0
+

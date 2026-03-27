@@ -1,0 +1,30 @@
+From 4db0b6aa47c012346dfb2246030a6161570438b2 Mon Sep 17 00:00:00 2001
+From: Marco <marco@marcopolo.io>
+Date: Fri, 27 Mar 2026 00:16:36 +0000
+Subject: [PATCH 18/24] Close ristretto cache on validator service Stop
+
+Prevents goroutine leak from ristretto's processItems goroutines
+that have no context cancellation path.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+---
+ validator/client/service.go | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/validator/client/service.go b/validator/client/service.go
+index d90327f75c..be3d9fa357 100644
+--- a/validator/client/service.go
++++ b/validator/client/service.go
+@@ -280,6 +280,9 @@ func (v *ValidatorService) Start() {
+ // Stop the validator service.
+ func (v *ValidatorService) Stop() error {
+ 	v.cancel()
++	if val, ok := v.validator.(*validator); ok && val.domainDataCache != nil {
++		val.domainDataCache.Close()
++	}
+ 	log.Info("Stopping service")
+ 	return nil
+ }
+-- 
+2.43.0
+

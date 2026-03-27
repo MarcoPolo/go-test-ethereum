@@ -1,0 +1,51 @@
+From 1d58a7a152ad35da06c19c0a94b93ef337eb725d Mon Sep 17 00:00:00 2001
+From: Marco <marco@marcopolo.io>
+Date: Fri, 27 Mar 2026 05:53:04 +0000
+Subject: [PATCH 2/5] Export ListenFunc on P2P server for custom transport
+ injection
+
+Enables injecting QUIC-over-simnet as the P2P listen transport
+instead of TCP. Also includes the earlier synctest fix for
+LocalNode.Node() sleep-under-lock.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+---
+ p2p/server.go | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/p2p/server.go b/p2p/server.go
+index 6d2323f9c..31d6702cf 100644
+--- a/p2p/server.go
++++ b/p2p/server.go
+@@ -79,7 +79,7 @@ type Server struct {
+ 	// the whole protocol stack.
+ 	newTransport func(net.Conn, *ecdsa.PublicKey) transport
+ 	newPeerHook  func(*Peer)
+-	listenFunc   func(network, addr string) (net.Listener, error)
++	ListenFunc   func(network, addr string) (net.Listener, error)
+ 
+ 	lock    sync.Mutex // protects running
+ 	running bool
+@@ -383,8 +383,8 @@ func (srv *Server) Start() (err error) {
+ 	if srv.newTransport == nil {
+ 		srv.newTransport = newRLPX
+ 	}
+-	if srv.listenFunc == nil {
+-		srv.listenFunc = net.Listen
++	if srv.ListenFunc == nil {
++		srv.ListenFunc = net.Listen
+ 	}
+ 	srv.quit = make(chan struct{})
+ 	srv.delpeer = make(chan peerDrop)
+@@ -566,7 +566,7 @@ func (srv *Server) MaxDialedConns() (limit int) {
+ 
+ func (srv *Server) setupListening() error {
+ 	// Launch the listener.
+-	listener, err := srv.listenFunc("tcp", srv.ListenAddr)
++	listener, err := srv.ListenFunc("tcp", srv.ListenAddr)
+ 	if err != nil {
+ 		return err
+ 	}
+-- 
+2.43.0
+

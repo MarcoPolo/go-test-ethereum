@@ -1,0 +1,46 @@
+From 26d55635ed8de414b8c13307ebcadbcc2989d8f0 Mon Sep 17 00:00:00 2001
+From: Marco <marco@marcopolo.io>
+Date: Thu, 26 Mar 2026 23:15:16 +0000
+Subject: [PATCH 13/24] Fix remaining goroutine leaks: go-cache, leaky-bucket,
+ host close
+
+- Disable tracked_validators cache janitor
+- Free leaky-bucket collector on P2P Stop
+- Close libp2p host on P2P Stop
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+---
+ beacon-chain/cache/tracked_validators.go | 2 +-
+ beacon-chain/p2p/service.go              | 3 +++
+ 2 files changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/beacon-chain/cache/tracked_validators.go b/beacon-chain/cache/tracked_validators.go
+index 33c84a8fa4..7f33da7a78 100644
+--- a/beacon-chain/cache/tracked_validators.go
++++ b/beacon-chain/cache/tracked_validators.go
+@@ -49,7 +49,7 @@ var (
+ // NewTrackedValidatorsCache creates a new cache for tracking validators.
+ func NewTrackedValidatorsCache() *TrackedValidatorsCache {
+ 	return &TrackedValidatorsCache{
+-		trackedValidators: cache.New(defaultExpiration, cleanupInterval),
++		trackedValidators: cache.New(defaultExpiration, 0),
+ 	}
+ }
+ 
+diff --git a/beacon-chain/p2p/service.go b/beacon-chain/p2p/service.go
+index ff5a952bd7..9e8887b23c 100644
+--- a/beacon-chain/p2p/service.go
++++ b/beacon-chain/p2p/service.go
+@@ -319,6 +319,9 @@ func (s *Service) Stop() error {
+ 			log.WithError(err).Error("Failed to close libp2p host")
+ 		}
+ 	}
++	if s.ipLimiter != nil {
++		s.ipLimiter.Free()
++	}
+ 	return nil
+ }
+ 
+-- 
+2.43.0
+

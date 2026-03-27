@@ -1,0 +1,100 @@
+From 55465b164ae9c1fc77fe3cf1ad9e63dae0bbc5fd Mon Sep 17 00:00:00 2001
+From: Marco <marco@marcopolo.io>
+Date: Thu, 26 Mar 2026 20:26:18 +0000
+Subject: [PATCH 02/24] Add CustomLibp2pOptions to P2P config for transport
+ injection
+
+When CustomLibp2pOptions is set, buildOptions() uses those instead of
+the default TCP/QUIC transport and listen address configuration. This
+enables injecting simnet-backed QUIC transports for in-process testing.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+---
+ beacon-chain/p2p/config.go  |  5 +++++
+ beacon-chain/p2p/options.go | 40 ++++++++++++++++++++++++++++---------
+ 2 files changed, 36 insertions(+), 9 deletions(-)
+
+diff --git a/beacon-chain/p2p/config.go b/beacon-chain/p2p/config.go
+index 1ef94a21df..6dfd35eea4 100644
+--- a/beacon-chain/p2p/config.go
++++ b/beacon-chain/p2p/config.go
+@@ -8,6 +8,7 @@ import (
+ 	"github.com/OffchainLabs/prysm/v7/beacon-chain/db"
+ 	"github.com/OffchainLabs/prysm/v7/beacon-chain/startup"
+ 	"github.com/OffchainLabs/prysm/v7/beacon-chain/state/stategen"
++	"github.com/libp2p/go-libp2p"
+ 	"github.com/sirupsen/logrus"
+ )
+ 
+@@ -52,6 +53,10 @@ type Config struct {
+ 	DB                    db.ReadOnlyDatabaseWithSeqNum
+ 	StateGen              stategen.StateManager
+ 	ClockWaiter           startup.ClockWaiter
++	// CustomLibp2pOptions, when set, replaces the default transport options
++	// (TCP, QUIC, listen addresses). This allows injecting simnet-based
++	// QUIC transports for in-process testing.
++	CustomLibp2pOptions []libp2p.Option
+ }
+ 
+ // connManagerLowHigh picks the low and high water marks for the connection manager based
+diff --git a/beacon-chain/p2p/options.go b/beacon-chain/p2p/options.go
+index a95f1d03c4..87b0e68782 100644
+--- a/beacon-chain/p2p/options.go
++++ b/beacon-chain/p2p/options.go
+@@ -78,6 +78,37 @@ func setConnManagerOption(cfg *Config, opts []libp2p.Option) ([]libp2p.Option, e
+ // buildOptions for the libp2p host.
+ func (s *Service) buildOptions(ip net.IP, priKey *ecdsa.PrivateKey) ([]libp2p.Option, error) {
+ 	cfg := s.cfg
++
++	ifaceKey, err := ecdsaprysm.ConvertToInterfacePrivkey(priKey)
++	if err != nil {
++		return nil, errors.Wrap(err, "cannot convert private key to interface private key. (Private key not displayed in logs for security reasons)")
++	}
++	id, err := peer.IDFromPublicKey(ifaceKey.GetPublic())
++	if err != nil {
++		return nil, errors.Wrapf(err, "cannot get ID from public key: %s", ifaceKey.GetPublic().Type().String())
++	}
++	log.Infof("Running node with peer id of %s ", id.String())
++
++	// When custom libp2p options are provided (e.g. for simnet testing),
++	// use them instead of the default transport/listen configuration.
++	if len(cfg.CustomLibp2pOptions) > 0 {
++		options := []libp2p.Option{
++			privKeyOption(priKey),
++			libp2p.UserAgent(version.BuildData()),
++			libp2p.ConnectionGater(s),
++			libp2p.Security(noise.ID, noise.New),
++			libp2p.Ping(false),
++			libp2p.DisableRelay(),
++			libp2p.ResourceManager(&network.NullResourceManager{}),
++		}
++		options, err = setConnManagerOption(s.cfg, options)
++		if err != nil {
++			return nil, errors.Wrap(err, "set connection manager option")
++		}
++		options = append(options, cfg.CustomLibp2pOptions...)
++		return options, nil
++	}
++
+ 	multiaddrs, err := MultiAddressBuilder(ip, cfg.TCPPort, cfg.QUICPort)
+ 	if err != nil {
+ 		return nil, errors.Wrapf(err, "cannot produce multiaddr format from %s:%d", ip, cfg.TCPPort)
+@@ -93,15 +124,6 @@ func (s *Service) buildOptions(ip net.IP, priKey *ecdsa.PrivateKey) ([]libp2p.Op
+ 			return nil, errors.Wrapf(err, "cannot produce multiaddr format from %s:%d", cfg.LocalIP, cfg.TCPPort)
+ 		}
+ 	}
+-	ifaceKey, err := ecdsaprysm.ConvertToInterfacePrivkey(priKey)
+-	if err != nil {
+-		return nil, errors.Wrap(err, "cannot convert private key to interface private key. (Private key not displayed in logs for security reasons)")
+-	}
+-	id, err := peer.IDFromPublicKey(ifaceKey.GetPublic())
+-	if err != nil {
+-		return nil, errors.Wrapf(err, "cannot get ID from public key: %s", ifaceKey.GetPublic().Type().String())
+-	}
+-	log.Infof("Running node with peer id of %s ", id.String())
+ 
+ 	options := []libp2p.Option{
+ 		privKeyOption(priKey),
+-- 
+2.43.0
+

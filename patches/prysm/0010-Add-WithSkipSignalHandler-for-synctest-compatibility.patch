@@ -1,0 +1,84 @@
+From d2bc11a309aa3f3adbb691795621d9dce89bfa69 Mon Sep 17 00:00:00 2001
+From: Marco <marco@marcopolo.io>
+Date: Thu, 26 Mar 2026 22:22:28 +0000
+Subject: [PATCH 10/24] Add WithSkipSignalHandler for synctest compatibility
+
+signal.Notify creates channels inside the synctest bubble that the
+runtime signal goroutine (outside the bubble) tries to select on,
+causing a fatal error. Skip the handler when running in-process tests.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+---
+ beacon-chain/node/node.go    | 29 ++++++++++++++++-------------
+ beacon-chain/node/options.go |  9 +++++++++
+ 2 files changed, 25 insertions(+), 13 deletions(-)
+
+diff --git a/beacon-chain/node/node.go b/beacon-chain/node/node.go
+index cdb40f3072..bb1b2a31eb 100644
+--- a/beacon-chain/node/node.go
++++ b/beacon-chain/node/node.go
+@@ -137,6 +137,7 @@ type BeaconNode struct {
+ 	customP2PConfig                 *p2p.Config
+ 	GRPCListener                    net.Listener
+ 	HTTPListener                    net.Listener
++	skipSignalHandler               bool
+ }
+ 
+ // New creates a new node instance, sets up configuration options, and registers
+@@ -503,21 +504,23 @@ func (b *BeaconNode) Start() {
+ 	stop := b.stop
+ 	b.lock.Unlock()
+ 
+-	go func() {
+-		sigc := make(chan os.Signal, 1)
+-		signal.Notify(sigc, syscall.SIGINT, syscall.SIGTERM)
+-		defer signal.Stop(sigc)
+-		<-sigc
+-		log.Info("Got interrupt, shutting down...")
+-		go b.Close()
+-		for i := 10; i > 0; i-- {
++	if !b.skipSignalHandler {
++		go func() {
++			sigc := make(chan os.Signal, 1)
++			signal.Notify(sigc, syscall.SIGINT, syscall.SIGTERM)
++			defer signal.Stop(sigc)
+ 			<-sigc
+-			if i > 1 {
+-				log.WithField("times", i-1).Info("Already shutting down, interrupt more to panic")
++			log.Info("Got interrupt, shutting down...")
++			go b.Close()
++			for i := 10; i > 0; i-- {
++				<-sigc
++				if i > 1 {
++					log.WithField("times", i-1).Info("Already shutting down, interrupt more to panic")
++				}
+ 			}
+-		}
+-		panic("Panic closing the beacon node") // lint:nopanic -- Panic is requested by user.
+-	}()
++			panic("Panic closing the beacon node") // lint:nopanic -- Panic is requested by user.
++		}()
++	}
+ 
+ 	// Wait for stop channel to be closed.
+ 	<-stop
+diff --git a/beacon-chain/node/options.go b/beacon-chain/node/options.go
+index 9542edfeb7..7539981d2f 100644
+--- a/beacon-chain/node/options.go
++++ b/beacon-chain/node/options.go
+@@ -105,3 +105,12 @@ func WithHTTPListener(lis net.Listener) Option {
+ 		return nil
+ 	}
+ }
++
++// WithSkipSignalHandler disables the signal handler in Start(),
++// which is needed for synctest compatibility (signal channels cross bubble boundaries).
++func WithSkipSignalHandler() Option {
++	return func(bn *BeaconNode) error {
++		bn.skipSignalHandler = true
++		return nil
++	}
++}
+-- 
+2.43.0
+

@@ -1,0 +1,51 @@
+From 6613a9f824483d01b6142ef50552eeea0841f1a7 Mon Sep 17 00:00:00 2001
+From: Marco <marco@marcopolo.io>
+Date: Thu, 26 Mar 2026 22:21:18 +0000
+Subject: [PATCH 1/5] Fix LocalNode.Node() sleep-under-lock for synctest
+ compatibility
+
+Release the mutex before sleeping in the update throttle loop.
+Under synctest, sleeping while holding a lock blocks time advancement
+since other goroutines waiting on the lock are not time-blocked.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+---
+ p2p/enode/localnode.go | 21 ++++++++++++++-------
+ 1 file changed, 14 insertions(+), 7 deletions(-)
+
+diff --git a/p2p/enode/localnode.go b/p2p/enode/localnode.go
+index 6425560b0..223cc174d 100644
+--- a/p2p/enode/localnode.go
++++ b/p2p/enode/localnode.go
+@@ -109,14 +109,21 @@ func (ln *LocalNode) Node() *Node {
+ 		return n
+ 	}
+ 
+-	// The initial sequence number is the current timestamp in milliseconds. To ensure
+-	// that the initial sequence number will always be higher than any previous sequence
+-	// number (assuming the clock is correct), we want to avoid updating the record faster
+-	// than once per ms. So we need to sleep here until the next possible update time has
+-	// arrived.
+-	lastChange := time.Since(ln.update)
+-	if lastChange < recordUpdateThrottle {
++	// Throttle: wait until at least recordUpdateThrottle has passed since last update.
++	// Note: the sleep is done in a loop that releases the lock to avoid blocking
++	// other goroutines (important for synctest compatibility).
++	for {
++		lastChange := time.Since(ln.update)
++		if lastChange >= recordUpdateThrottle {
++			break
++		}
++		ln.mu.Unlock()
+ 		time.Sleep(recordUpdateThrottle - lastChange)
++		ln.mu.Lock()
++		// Re-check if another goroutine signed while we slept.
++		if n = ln.cur.Load(); n != nil {
++			return n
++		}
+ 	}
+ 
+ 	ln.sign()
+-- 
+2.43.0
+

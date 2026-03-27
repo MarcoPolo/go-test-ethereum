@@ -1,0 +1,39 @@
+From 041e902f18c9580c62d253bf720d731933b78a0b Mon Sep 17 00:00:00 2001
+From: Marco <marco@marcopolo.io>
+Date: Thu, 26 Mar 2026 23:19:16 +0000
+Subject: [PATCH 15/24] Add context-aware ephemeral DataColumnStorage
+ constructor
+
+Allow passing a cancellable context so the pruning goroutine
+exits when the test is done.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+---
+ beacon-chain/db/filesystem/mock.go | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/beacon-chain/db/filesystem/mock.go b/beacon-chain/db/filesystem/mock.go
+index fcfd92090e..ca518003f6 100644
+--- a/beacon-chain/db/filesystem/mock.go
++++ b/beacon-chain/db/filesystem/mock.go
+@@ -125,12 +125,16 @@ func NewWarmedEphemeralDataColumnStorageUsingFs(t testing.TB, fs afero.Fs, opts
+ }
+ 
+ func NewEphemeralDataColumnStorageUsingFs(t testing.TB, fs afero.Fs, opts ...DataColumnStorageOption) *DataColumnStorage {
++	return NewEphemeralDataColumnStorageWithCtx(t, context.Background(), fs, opts...)
++}
++
++func NewEphemeralDataColumnStorageWithCtx(t testing.TB, ctx context.Context, fs afero.Fs, opts ...DataColumnStorageOption) *DataColumnStorage {
+ 	opts = append(opts,
+ 		WithDataColumnRetentionEpochs(params.BeaconConfig().MinEpochsForDataColumnSidecarsRequest),
+ 		WithDataColumnFs(fs),
+ 	)
+ 
+-	bs, err := NewDataColumnStorage(context.Background(), opts...)
++	bs, err := NewDataColumnStorage(ctx, opts...)
+ 	if err != nil {
+ 		t.Fatal(err)
+ 	}
+-- 
+2.43.0
+

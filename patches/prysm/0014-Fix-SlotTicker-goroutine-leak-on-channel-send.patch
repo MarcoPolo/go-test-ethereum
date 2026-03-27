@@ -1,0 +1,47 @@
+From c1873060c023c0b096bd98229aa34235012c8c35 Mon Sep 17 00:00:00 2001
+From: Marco <marco@marcopolo.io>
+Date: Thu, 26 Mar 2026 23:17:03 +0000
+Subject: [PATCH 14/24] Fix SlotTicker goroutine leak on channel send
+
+The slot ticker goroutine blocks forever on s.c <- slot when the
+consumer stops reading. Add select with s.done to allow the
+goroutine to exit during shutdown.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+---
+ time/slots/slotticker.go | 12 ++++++++++--
+ 1 file changed, 10 insertions(+), 2 deletions(-)
+
+diff --git a/time/slots/slotticker.go b/time/slots/slotticker.go
+index fc7258f013..3714f80553 100644
+--- a/time/slots/slotticker.go
++++ b/time/slots/slotticker.go
+@@ -134,7 +134,11 @@ func (s *SlotTicker) start(
+ 			waitTime := until(nextTickTime)
+ 			select {
+ 			case <-after(waitTime):
+-				s.c <- slot
++				select {
++				case s.c <- slot:
++				case <-s.done:
++					return
++				}
+ 				slot++
+ 				nextTickTime = nextTickTime.Add(d)
+ 			case <-s.done:
+@@ -162,7 +166,11 @@ func (s *SlotIntervalTicker) startWithIntervals(
+ 			waitTime := until(nextTickTime)
+ 			select {
+ 			case <-after(waitTime):
+-				s.c <- SlotInterval{Slot: slot, Interval: interval}
++				select {
++				case s.c <- SlotInterval{Slot: slot, Interval: interval}:
++				case <-s.done:
++					return
++				}
+ 				interval++
+ 				if interval == len(intervals) {
+ 					interval = 0
+-- 
+2.43.0
+

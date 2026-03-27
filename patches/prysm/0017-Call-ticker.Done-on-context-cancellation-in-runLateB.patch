@@ -1,0 +1,29 @@
+From c9fd3e84bc8925e83d1d1cefe63eac8b1c0e14df Mon Sep 17 00:00:00 2001
+From: Marco <marco@marcopolo.io>
+Date: Thu, 26 Mar 2026 23:21:41 +0000
+Subject: [PATCH 17/24] Call ticker.Done() on context cancellation in
+ runLateBlockTasks
+
+Prevents SlotTicker goroutine from leaking when the blockchain
+service shuts down.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+---
+ beacon-chain/blockchain/process_block.go | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/beacon-chain/blockchain/process_block.go b/beacon-chain/blockchain/process_block.go
+index 53564f4905..f332a3f4a2 100644
+--- a/beacon-chain/blockchain/process_block.go
++++ b/beacon-chain/blockchain/process_block.go
+@@ -746,6 +746,7 @@ func (s *Service) runLateBlockTasks() {
+ 			s.lateBlockTasks(s.ctx)
+ 		case <-s.ctx.Done():
+ 			log.Debug("Context closed, exiting routine")
++			ticker.Done()
+ 			return
+ 		}
+ 	}
+-- 
+2.43.0
+

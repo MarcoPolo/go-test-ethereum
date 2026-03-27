@@ -1,0 +1,148 @@
+From 441c15fa63817215d72161f44b0315292a43d936 Mon Sep 17 00:00:00 2001
+From: Marco <marco@marcopolo.io>
+Date: Thu, 26 Mar 2026 22:11:15 +0000
+Subject: [PATCH 09/24] Add HTTP listener injection and fix validator REST
+ check
+
+- Add WithListener option to httprest server
+- Add WithHTTPListener option to BeaconNode
+- Fix validator service to accept gRPC-only connection (no REST required)
+- Wire HTTP listener through BeaconNode to httprest server
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+---
+ api/server/httprest/options.go |  9 +++++++++
+ api/server/httprest/server.go  | 21 ++++++++++++++++-----
+ beacon-chain/node/node.go      |  4 ++++
+ beacon-chain/node/options.go   |  9 +++++++++
+ validator/client/service.go    |  5 +++--
+ 5 files changed, 41 insertions(+), 7 deletions(-)
+
+diff --git a/api/server/httprest/options.go b/api/server/httprest/options.go
+index b825f33605..ea4a91f7f2 100644
+--- a/api/server/httprest/options.go
++++ b/api/server/httprest/options.go
+@@ -1,6 +1,7 @@
+ package httprest
+ 
+ import (
++	"net"
+ 	"net/http"
+ 	"time"
+ 
+@@ -41,3 +42,11 @@ func WithTimeout(duration time.Duration) Option {
+ 		return nil
+ 	}
+ }
++
++// WithListener injects a custom net.Listener, bypassing the default TCP listener.
++func WithListener(lis net.Listener) Option {
++	return func(g *Server) error {
++		g.cfg.listener = lis
++		return nil
++	}
++}
+diff --git a/api/server/httprest/server.go b/api/server/httprest/server.go
+index af059e1856..72ff3dbec7 100644
+--- a/api/server/httprest/server.go
++++ b/api/server/httprest/server.go
+@@ -2,6 +2,7 @@ package httprest
+ 
+ import (
+ 	"context"
++	"net"
+ 	"net/http"
+ 	"time"
+ 
+@@ -18,6 +19,7 @@ type config struct {
+ 	middlewares []middleware.Middleware
+ 	router      http.Handler
+ 	timeout     time.Duration
++	listener    net.Listener
+ }
+ 
+ // Server serves HTTP traffic.
+@@ -64,11 +66,20 @@ func (g *Server) Start() {
+ 	g.ctx, g.cancel = context.WithCancel(g.ctx)
+ 
+ 	go func() {
+-		log.WithField("address", g.cfg.httpAddr).Info("Starting HTTP server")
+-		if err := g.server.ListenAndServe(); err != http.ErrServerClosed {
+-			log.WithError(err).Error("Failed to start HTTP server")
+-			g.startFailure = err
+-			return
++		if g.cfg.listener != nil {
++			log.WithField("address", g.cfg.listener.Addr().String()).Info("Starting HTTP server on injected listener")
++			if err := g.server.Serve(g.cfg.listener); err != http.ErrServerClosed {
++				log.WithError(err).Error("Failed to start HTTP server")
++				g.startFailure = err
++				return
++			}
++		} else {
++			log.WithField("address", g.cfg.httpAddr).Info("Starting HTTP server")
++			if err := g.server.ListenAndServe(); err != http.ErrServerClosed {
++				log.WithError(err).Error("Failed to start HTTP server")
++				g.startFailure = err
++				return
++			}
+ 		}
+ 	}()
+ }
+diff --git a/beacon-chain/node/node.go b/beacon-chain/node/node.go
+index 2e5fdc28ae..cdb40f3072 100644
+--- a/beacon-chain/node/node.go
++++ b/beacon-chain/node/node.go
+@@ -136,6 +136,7 @@ type BeaconNode struct {
+ 	SyncNeedsWaiter                 func() (das.SyncNeeds, error)
+ 	customP2PConfig                 *p2p.Config
+ 	GRPCListener                    net.Listener
++	HTTPListener                    net.Listener
+ }
+ 
+ // New creates a new node instance, sets up configuration options, and registers
+@@ -1107,6 +1108,9 @@ func (b *BeaconNode) registerHTTPService(router *http.ServeMux) error {
+ 		httprest.WithHTTPAddr(address),
+ 		httprest.WithMiddlewares(middlewares),
+ 	}
++	if b.HTTPListener != nil {
++		opts = append(opts, httprest.WithListener(b.HTTPListener))
++	}
+ 	if b.cliCtx.IsSet(cmd.ApiTimeoutFlag.Name) {
+ 		opts = append(opts, httprest.WithTimeout(b.cliCtx.Duration(cmd.ApiTimeoutFlag.Name)))
+ 	}
+diff --git a/beacon-chain/node/options.go b/beacon-chain/node/options.go
+index 40ed2db0f1..9542edfeb7 100644
+--- a/beacon-chain/node/options.go
++++ b/beacon-chain/node/options.go
+@@ -96,3 +96,12 @@ func WithGRPCListener(lis net.Listener) Option {
+ 		return nil
+ 	}
+ }
++
++// WithHTTPListener injects a custom net.Listener for the HTTP REST server,
++// bypassing the default TCP listener.
++func WithHTTPListener(lis net.Listener) Option {
++	return func(bn *BeaconNode) error {
++		bn.HTTPListener = lis
++		return nil
++	}
++}
+diff --git a/validator/client/service.go b/validator/client/service.go
+index 2db802ba8c..d90327f75c 100644
+--- a/validator/client/service.go
++++ b/validator/client/service.go
+@@ -183,8 +183,9 @@ func (v *ValidatorService) Start() {
+ 	}
+ 
+ 	restProvider := v.conn.GetRestConnectionProvider()
+-	if restProvider == nil || len(restProvider.Hosts()) == 0 {
+-		log.Error("No REST API hosts provided")
++	grpcProvider := v.conn.GetGrpcConnectionProvider()
++	if (restProvider == nil || len(restProvider.Hosts()) == 0) && grpcProvider == nil {
++		log.Error("No REST API or gRPC hosts provided")
+ 		return
+ 	}
+ 
+-- 
+2.43.0
+

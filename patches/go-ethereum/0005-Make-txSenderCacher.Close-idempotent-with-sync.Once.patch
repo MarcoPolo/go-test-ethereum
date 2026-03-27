@@ -1,0 +1,46 @@
+From 6ff95590920da527fdcc15fd69b2daca4f42be8c Mon Sep 17 00:00:00 2001
+From: Marco <marco@marcopolo.io>
+Date: Fri, 27 Mar 2026 21:15:19 +0000
+Subject: [PATCH 5/5] Make txSenderCacher.Close() idempotent with sync.Once
+
+Prevents panic from double-close when multiple EL nodes share the
+singleton cacher in a single-process test.
+
+Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
+---
+ core/sender_cacher.go | 11 +++++++----
+ 1 file changed, 7 insertions(+), 4 deletions(-)
+
+diff --git a/core/sender_cacher.go b/core/sender_cacher.go
+index 132d2fc49..51c4546f6 100644
+--- a/core/sender_cacher.go
++++ b/core/sender_cacher.go
+@@ -49,8 +49,9 @@ type txSenderCacherRequest struct {
+ // txSenderCacher is a helper structure to concurrently ecrecover transaction
+ // senders from digital signatures on background threads.
+ type txSenderCacher struct {
+-	threads int
+-	tasks   chan *txSenderCacherRequest
++	threads   int
++	tasks     chan *txSenderCacherRequest
++	closeOnce sync.Once
+ }
+ 
+ // newTxSenderCacher creates a new transaction sender background cacher and starts
+@@ -66,9 +67,11 @@ func newTxSenderCacher(threads int) *txSenderCacher {
+ 	return cacher
+ }
+ 
+-// Close stops all cache goroutines.
++// Close stops all cache goroutines. It is safe to call multiple times.
+ func (cacher *txSenderCacher) Close() {
+-	close(cacher.tasks)
++	cacher.closeOnce.Do(func() {
++		close(cacher.tasks)
++	})
+ }
+ 
+ // cache is an infinite loop, caching transaction senders from various forms of
+-- 
+2.43.0
+

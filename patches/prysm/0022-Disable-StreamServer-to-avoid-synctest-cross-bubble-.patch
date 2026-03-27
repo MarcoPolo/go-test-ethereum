@@ -1,0 +1,41 @@
+From 2a9d1f11848d6c86d938285943262a7e28cdea49 Mon Sep 17 00:00:00 2001
+From: Marco <marco@marcopolo.io>
+Date: Fri, 27 Mar 2026 06:25:37 +0000
+Subject: [PATCH 22/24] Disable StreamServer to avoid synctest cross-bubble
+ channel access
+
+The StreamServer's event.Feed created inside the synctest bubble
+gets accessed by the global logrus writer outside the bubble,
+causing a fatal error.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+---
+ beacon-chain/rpc/service.go | 5 ++---
+ 1 file changed, 2 insertions(+), 3 deletions(-)
+
+diff --git a/beacon-chain/rpc/service.go b/beacon-chain/rpc/service.go
+index 38e1db5afd..260b7e569a 100644
+--- a/beacon-chain/rpc/service.go
++++ b/beacon-chain/rpc/service.go
+@@ -39,8 +39,7 @@ import (
+ 	chainSync "github.com/OffchainLabs/prysm/v7/beacon-chain/sync"
+ 	"github.com/OffchainLabs/prysm/v7/config/features"
+ 	"github.com/OffchainLabs/prysm/v7/config/params"
+-	"github.com/OffchainLabs/prysm/v7/io/logs"
+-	"github.com/OffchainLabs/prysm/v7/monitoring/tracing"
++"github.com/OffchainLabs/prysm/v7/monitoring/tracing"
+ 	ethpbv1alpha1 "github.com/OffchainLabs/prysm/v7/proto/prysm/v1alpha1"
+ 	middleware "github.com/grpc-ecosystem/go-grpc-middleware"
+ 	recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
+@@ -280,7 +279,7 @@ func NewService(ctx context.Context, cfg *Config) *Service {
+ 	}
+ 	s.validatorServer = validatorServer
+ 	nodeServer := &nodev1alpha1.Server{
+-		LogsStreamer:          logs.NewStreamServer(),
++		LogsStreamer:          nil, // Disabled to avoid cross-bubble channel access in synctest
+ 		StreamLogsBufferSize:  1000, // Enough to handle bursts of beacon node logs for gRPC streaming.
+ 		BeaconDB:              s.cfg.BeaconDB,
+ 		Server:                s.grpcServer,
+-- 
+2.43.0
+

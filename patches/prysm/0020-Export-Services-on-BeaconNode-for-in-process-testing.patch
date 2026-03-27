@@ -1,0 +1,29 @@
+From 9f2f93c370efc0237f8a1ed289ad55ed59c956fe Mon Sep 17 00:00:00 2001
+From: Marco <marco@marcopolo.io>
+Date: Fri, 27 Mar 2026 04:44:34 +0000
+Subject: [PATCH 20/24] Export Services() on BeaconNode for in-process testing
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+---
+ beacon-chain/node/node.go | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/beacon-chain/node/node.go b/beacon-chain/node/node.go
+index bb1b2a31eb..eeaf4f8307 100644
+--- a/beacon-chain/node/node.go
++++ b/beacon-chain/node/node.go
+@@ -527,6 +527,11 @@ func (b *BeaconNode) Start() {
+ }
+ 
+ // Close handles graceful shutdown of the system.
++// Services returns the service registry.
++func (b *BeaconNode) Services() *runtime.ServiceRegistry {
++	return b.services
++}
++
+ func (b *BeaconNode) Close() {
+ 	b.lock.Lock()
+ 	defer b.lock.Unlock()
+-- 
+2.43.0
+

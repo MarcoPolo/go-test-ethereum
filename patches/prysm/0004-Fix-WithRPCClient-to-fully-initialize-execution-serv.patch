@@ -1,0 +1,75 @@
+From 351e10a9a8d3ea1648ee7a717ccd575d9ea627ef Mon Sep 17 00:00:00 2001
+From: Marco <marco@marcopolo.io>
+Date: Thu, 26 Mar 2026 20:40:43 +0000
+Subject: [PATCH 04/24] Fix WithRPCClient to fully initialize execution service
+
+Accept *gethRPC.Client to also set up ethclient and httpLogger.
+Set up depositContractCaller at Start() time after all options applied.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+---
+ beacon-chain/execution/options.go |  6 +++++-
+ beacon-chain/execution/service.go | 14 ++++++++++++++
+ 2 files changed, 19 insertions(+), 1 deletion(-)
+
+diff --git a/beacon-chain/execution/options.go b/beacon-chain/execution/options.go
+index 11dc8f4759..e106806f90 100644
+--- a/beacon-chain/execution/options.go
++++ b/beacon-chain/execution/options.go
+@@ -10,6 +10,8 @@ import (
+ 	"github.com/OffchainLabs/prysm/v7/network"
+ 	"github.com/OffchainLabs/prysm/v7/network/authorization"
+ 	"github.com/ethereum/go-ethereum/common"
++	"github.com/ethereum/go-ethereum/ethclient"
++	gethRPC "github.com/ethereum/go-ethereum/rpc"
+ )
+ 
+ type Option func(s *Service) error
+@@ -136,9 +138,11 @@ func WithGraffitiInfo(g *GraffitiInfo) Option {
+ // WithRPCClient injects a pre-built RPC client for the execution service,
+ // bypassing the normal HTTP dial in setupExecutionClientConnections.
+ // This is used for in-process testing where the EL node runs in the same process.
+-func WithRPCClient(client RPCClient) Option {
++func WithRPCClient(client *gethRPC.Client) Option {
+ 	return func(s *Service) error {
++		fetcher := ethclient.NewClient(client)
+ 		s.rpcClient = client
++		s.httpLogger = fetcher
+ 		s.connectedETH1 = true
+ 		return nil
+ 	}
+diff --git a/beacon-chain/execution/service.go b/beacon-chain/execution/service.go
+index 8411593384..2cbe2f9036 100644
+--- a/beacon-chain/execution/service.go
++++ b/beacon-chain/execution/service.go
+@@ -37,6 +37,7 @@ import (
+ 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
+ 	"github.com/ethereum/go-ethereum/common"
+ 	"github.com/ethereum/go-ethereum/common/hexutil"
++	"github.com/ethereum/go-ethereum/ethclient"
+ 	gethRPC "github.com/ethereum/go-ethereum/rpc"
+ 	"github.com/pkg/errors"
+ 	"github.com/prometheus/client_golang/prometheus"
+@@ -221,6 +222,19 @@ func NewService(ctx context.Context, opts ...Option) (*Service, error) {
+ 
+ // Start the powchain service's main event loop.
+ func (s *Service) Start() {
++	// If an RPC client was injected via WithRPCClient, set up the deposit contract caller
++	// now that all options have been applied (depositContractAddr is set).
++	if s.connectedETH1 && s.depositContractCaller == nil && s.httpLogger != nil {
++		if fetcher, ok := s.httpLogger.(*ethclient.Client); ok {
++			depositContractCaller, err := contracts.NewDepositContractCaller(s.cfg.depositContractAddr, fetcher)
++			if err != nil {
++				log.WithError(err).Error("Could not initialize deposit contract caller")
++			} else {
++				s.depositContractCaller = depositContractCaller
++			}
++		}
++	}
++
+ 	// If an RPC client was injected via WithRPCClient, skip connection setup.
+ 	if !s.connectedETH1 {
+ 		if err := s.setupExecutionClientConnections(s.ctx, s.cfg.currHttpEndpoint); err != nil {
+-- 
+2.43.0
+
