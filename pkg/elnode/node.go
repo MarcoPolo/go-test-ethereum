@@ -7,6 +7,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/eth"
+	"github.com/ethereum/go-ethereum/eth/catalyst"
 	"github.com/ethereum/go-ethereum/eth/ethconfig"
 	"github.com/ethereum/go-ethereum/miner"
 	"github.com/ethereum/go-ethereum/node"
@@ -53,6 +54,16 @@ func Start(t *testing.T, genesis *core.Genesis) *Node {
 	if err != nil {
 		t.Fatalf("failed to create eth service: %v", err)
 	}
+
+	// Register the Engine API directly (non-authenticated) so Prysm can call
+	// engine_* methods via in-process RPC. We skip catalyst.Register because it
+	// marks the API as authenticated, which triggers the auth HTTP server on TCP.
+	stack.RegisterAPIs([]rpc.API{
+		{
+			Namespace: "engine",
+			Service:   catalyst.NewConsensusAPI(ethService),
+		},
+	})
 
 	if err := stack.Start(); err != nil {
 		t.Fatalf("failed to start geth node: %v", err)
