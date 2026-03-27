@@ -53,25 +53,31 @@ type bufconnGRPCProvider struct {
 	counter uint64
 }
 
+func newBufconnGRPCConn(lis *bufconn.Listener) *grpc.ClientConn {
+	maxMsgSize := 10 * 1024 * 1024
+	//nolint:staticcheck // grpc.Dial is deprecated but grpc.NewClient doesn't apply DefaultCallOptions correctly
+	conn, err := grpc.Dial(
+		"bufconn",
+		grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) {
+			return lis.DialContext(ctx)
+		}),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithDefaultCallOptions(
+			grpc.MaxCallRecvMsgSize(maxMsgSize),
+			grpc.MaxCallSendMsgSize(maxMsgSize),
+		),
+	)
+	if err != nil {
+		panic(err)
+	}
+	return conn
+}
+
 func (p *bufconnGRPCProvider) CurrentConn() *grpc.ClientConn {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.closed {
 		return nil
-	}
-	if p.conn == nil {
-		conn, err := grpc.NewClient(
-			"passthrough:///bufconn",
-			grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) {
-				return p.lis.DialContext(ctx)
-			}),
-			grpc.WithTransportCredentials(insecure.NewCredentials()),
-			grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(10*1024*1024)),
-		)
-		if err != nil {
-			return nil
-		}
-		p.conn = conn
 	}
 	return p.conn
 }
@@ -148,7 +154,10 @@ func Start(t *testing.T, bc *BufconnPair, cfg Config) *ValNode {
 		cfg.DataDir = t.TempDir()
 	}
 
-	grpcProv := &bufconnGRPCProvider{lis: bc.GRPCListener}
+	grpcProv := &bufconnGRPCProvider{
+		lis:  bc.GRPCListener,
+		conn: newBufconnGRPCConn(bc.GRPCListener),
+	}
 	restProv := newBufconnRESTProvider(bc.HTTPListener)
 
 	nodeConn, err := validatorHelpers.NewNodeConnection(

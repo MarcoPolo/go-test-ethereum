@@ -85,6 +85,8 @@ func Start(t *testing.T, cfg Config) *Node {
 	set.Bool("no-discovery", true, "disable discovery")
 	set.String("p2p-encoding", "ssz-snappy", "p2p encoding")
 	set.Bool("disable-monitoring", true, "disable monitoring")
+	set.Int("grpc-max-msg-size", 10*1024*1024, "grpc max message size")
+	_ = set.Set("grpc-max-msg-size", "10485760")
 
 	// Create parent context
 	ctx, cancel := context.WithCancel(context.Background())
