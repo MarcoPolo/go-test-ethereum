@@ -6,6 +6,7 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/marcopolo/go-test-ethereum/pkg/clnode"
 	"github.com/marcopolo/go-test-ethereum/pkg/elnode"
 	"github.com/marcopolo/go-test-ethereum/pkg/genesis"
@@ -16,14 +17,16 @@ import (
 
 func TestEthereum(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		// 1. Setup simnet (needed for libp2p QUIC transport)
+		// 1. Setup simnet
 		sn := &simnet.Simnet{
 			LatencyFunc: simnet.StaticLatency(1 * time.Millisecond),
 		}
-		conn := sn.NewEndpoint(&net.UDPAddr{IP: net.ParseIP("1.0.0.1"), Port: 9000}, simnet.NodeBiDiLinkSettings{
+		ls := simnet.NodeBiDiLinkSettings{
 			Downlink: simnet.LinkSettings{BitsPerSecond: 100 * simnet.Mibps},
 			Uplink:   simnet.LinkSettings{BitsPerSecond: 100 * simnet.Mibps},
-		})
+		}
+		cl1Conn := sn.NewEndpoint(&net.UDPAddr{IP: net.ParseIP("1.0.0.1"), Port: 9000}, ls)
+		cl2Conn := sn.NewEndpoint(&net.UDPAddr{IP: net.ParseIP("1.0.0.2"), Port: 9000}, ls)
 		sn.Start()
 
 		// 2. Generate genesis
@@ -32,43 +35,65 @@ func TestEthereum(t *testing.T) {
 			GenesisTime:   time.Now().Add(10 * time.Second),
 		})
 
-		// 3. Start EL node
-		el := elnode.Start(t, gen.ELGenesis)
+		// 3. Start 2 separate EL nodes (each CL gets its own EL)
+		el1 := elnode.Start(t, gen.ELGenesis)
+		el2 := elnode.Start(t, gen.ELGenesis)
 
-		// 4. Create QUIC transport
-		clOpts, st, err := quicnet.NewSimnetTransport(conn)
-		if err != nil {
-			t.Fatal(err)
+		// 4. Create QUIC transports
+		cl1Opts, st1, _ := quicnet.NewSimnetTransport(cl1Conn)
+		cl2Opts, st2, _ := quicnet.NewSimnetTransport(cl2Conn)
+
+		// 5. Start 2 CL nodes
+		bc1 := valnode.NewBufconnPair()
+		bc2 := valnode.NewBufconnPair()
+		cl1 := clnode.Start(t, clnode.Config{
+			GenesisState: gen.CLState, BeaconConfig: gen.BeaconConfig,
+			RPCClient: el1.Attach(), Libp2pOptions: cl1Opts,
+			GRPCListener: bc1.GRPCListener, HTTPListener: bc1.HTTPListener,
+		})
+		cl2 := clnode.Start(t, clnode.Config{
+			GenesisState: gen.CLState, BeaconConfig: gen.BeaconConfig,
+			RPCClient: el2.Attach(), Libp2pOptions: cl2Opts,
+			GRPCListener: bc2.GRPCListener, HTTPListener: bc2.HTTPListener,
+		})
+
+		// 6. Connect CL peers over simnet QUIC
+		time.Sleep(1 * time.Second)
+		p2p1 := cl1.P2PService()
+		p2p2 := cl2.P2PService()
+		if p2p1 != nil && p2p2 != nil && p2p2.Host() != nil {
+			if err := p2p1.Connect(peer.AddrInfo{ID: p2p2.Host().ID(), Addrs: p2p2.Host().Addrs()}); err != nil {
+				t.Fatalf("failed to connect peers: %v", err)
+			}
+			t.Log("CL peers connected via QUIC over simnet")
 		}
 
-		// 5. Start CL node with all 64 validators
-		bc := valnode.NewBufconnPair()
-		cl := clnode.Start(t, clnode.Config{
-			GenesisState:  gen.CLState,
-			BeaconConfig:  gen.BeaconConfig,
-			RPCClient:     el.Attach(),
-			Libp2pOptions: clOpts,
-			GRPCListener:  bc.GRPCListener,
-			HTTPListener:  bc.HTTPListener,
-		})
+		// 7. Start validators (32 each)
+		v1 := valnode.Start(t, bc1, valnode.Config{NumValidators: 32, StartIndex: 0})
+		v2 := valnode.Start(t, bc2, valnode.Config{NumValidators: 32, StartIndex: 32})
 
-		// 6. Start validator with all 64 keys
-		v := valnode.Start(t, bc, valnode.Config{
-			NumValidators: 64,
-			StartIndex:    0,
-		})
-
-		// 7. Wait for finality (6 epochs = ~768s with 4s slots)
+		// 8. Wait for finality (need ~4 epochs, 32 slots × 4s = 128s/epoch)
 		t.Log("Waiting for finality...")
 		time.Sleep(800 * time.Second)
-		t.Log("Done waiting")
+
+		// 9. Assert finalized epoch
+		epoch := cl1.FinalizedEpoch()
+		t.Logf("Finalized epoch: %d", epoch)
+		if epoch < 2 {
+			t.Fatalf("expected finalized epoch >= 2, got %d", epoch)
+		}
 
 		// Shutdown
-		v.Close()
-		cl.Close()
-		st.ConnManager.Close()
-		conn.Close()
-		el.Stack.Close()
+		v1.Close()
+		v2.Close()
+		cl1.Close()
+		cl2.Close()
+		st1.ConnManager.Close()
+		st2.ConnManager.Close()
+		cl1Conn.Close()
+		cl2Conn.Close()
+		el1.Stack.Close()
+		el2.Stack.Close()
 		sn.Close()
 		time.Sleep(300 * time.Second)
 	})

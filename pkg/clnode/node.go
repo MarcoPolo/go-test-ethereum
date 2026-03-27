@@ -9,6 +9,7 @@ import (
 
 	"net"
 
+	"github.com/OffchainLabs/prysm/v7/beacon-chain/blockchain"
 	"github.com/OffchainLabs/prysm/v7/beacon-chain/das"
 	"github.com/OffchainLabs/prysm/v7/beacon-chain/db/filesystem"
 	"github.com/spf13/afero"
@@ -171,4 +172,17 @@ func (n *Node) P2PService() *p2p.Service {
 		return nil
 	}
 	return svc
+}
+
+// FinalizedEpoch returns the current finalized epoch from the beacon chain.
+func (n *Node) FinalizedEpoch() uint64 {
+	var chainSvc *blockchain.Service
+	if err := n.Beacon.Services().FetchService(&chainSvc); err != nil {
+		return 0
+	}
+	cp := chainSvc.FinalizedCheckpt()
+	if cp == nil {
+		return 0
+	}
+	return uint64(cp.Epoch)
 }
