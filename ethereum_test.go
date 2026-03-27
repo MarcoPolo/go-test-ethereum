@@ -7,6 +7,7 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/ethereum/go-ethereum/core"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/marcopolo/go-test-ethereum/pkg/clnode"
 	"github.com/marcopolo/go-test-ethereum/pkg/elnode"
@@ -129,16 +130,21 @@ func TestEthereum(t *testing.T) {
 		}
 		t.Logf("SUCCESS: Both nodes agree on finalized epoch %d", e1)
 
-		// Shutdown
+		// Shutdown — order matters for clean goroutine exit
 		v1.Close()
 		cl1.Close()
 		cl2.Close()
 		st1.ConnManager.Close()
 		st2.ConnManager.Close()
+		el1Lis.Close()
+		el2Lis.Close()
 		cl1Conn.Close()
 		cl2Conn.Close()
+		el1Conn.Close()
+		el2Conn.Close()
 		el1.Stack.Close()
 		el2.Stack.Close()
+		core.SenderCacher().Close()
 		sn.Close()
 		time.Sleep(300 * time.Second)
 	})

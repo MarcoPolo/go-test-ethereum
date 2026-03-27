@@ -95,11 +95,11 @@ func Start(t *testing.T, genesis *core.Genesis, cfgs ...Config) *Node {
 		t.Fatalf("failed to create eth service: %v", err)
 	}
 
-	// Register the Engine API as non-authenticated for in-process RPC
+	// Register the Engine API (without heartbeat goroutine for clean synctest shutdown)
 	stack.RegisterAPIs([]rpc.API{
 		{
 			Namespace: "engine",
-			Service:   catalyst.NewConsensusAPI(ethService),
+			Service:   catalyst.NewConsensusAPIWithoutHeartbeat(ethService),
 		},
 	})
 
