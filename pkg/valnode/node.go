@@ -124,8 +124,24 @@ func (p *bufconnRESTProvider) Handler() rest.Handler {
 
 var _ rest.RestConnectionProvider = (*bufconnRESTProvider)(nil)
 
+// ValNode wraps a running validator service with a cleanup function.
+type ValNode struct {
+	cancel   context.CancelFunc
+	grpcProv *bufconnGRPCProvider
+	svc      *client.ValidatorService
+}
+
+// Close shuts down the validator node.
+func (v *ValNode) Close() {
+	v.cancel()
+	if v.svc != nil {
+		v.svc.Stop()
+	}
+	v.grpcProv.Close()
+}
+
 // Start creates and starts a Prysm validator client connected to a beacon node via bufconn.
-func Start(t *testing.T, bc *BufconnPair, cfg Config) {
+func Start(t *testing.T, bc *BufconnPair, cfg Config) *ValNode {
 	t.Helper()
 
 	if cfg.DataDir == "" {
@@ -147,10 +163,8 @@ func Start(t *testing.T, bc *BufconnPair, cfg Config) {
 	if err != nil {
 		t.Fatalf("failed to create validator database: %v", err)
 	}
-	t.Cleanup(func() { valDB.Close() })
 
 	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
 
 	validatorService, err := client.NewValidatorService(ctx, &client.Config{
 		DB:                     valDB,
@@ -169,10 +183,11 @@ func Start(t *testing.T, bc *BufconnPair, cfg Config) {
 	}
 
 	go validatorService.Start()
-	t.Cleanup(func() {
-		if err := validatorService.Stop(); err != nil {
-			t.Logf("validator service stop error: %v", err)
-		}
-	})
 	t.Log(fmt.Sprintf("Validator service started (indices %d-%d)", cfg.StartIndex, cfg.StartIndex+cfg.NumValidators-1))
+
+	return &ValNode{
+		cancel:   cancel,
+		grpcProv: grpcProv,
+		svc:      validatorService,
+	}
 }

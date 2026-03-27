@@ -45,11 +45,11 @@ func TestEthereum(t *testing.T) {
 		t.Log("EL nodes started")
 
 		// 4. Create QUIC-over-simnet transports
-		cl1Opts, _, err := quicnet.NewSimnetTransport(cl1Conn)
+		cl1Opts, st1, err := quicnet.NewSimnetTransport(cl1Conn)
 		if err != nil {
 			t.Fatalf("failed to create simnet transport for CL1: %v", err)
 		}
-		cl2Opts, _, err := quicnet.NewSimnetTransport(cl2Conn)
+		cl2Opts, st2, err := quicnet.NewSimnetTransport(cl2Conn)
 		if err != nil {
 			t.Fatalf("failed to create simnet transport for CL2: %v", err)
 		}
@@ -80,11 +80,11 @@ func TestEthereum(t *testing.T) {
 
 		// 7. Start validators
 		t.Log("Starting validators...")
-		valnode.Start(t, bc1, valnode.Config{
+		v1 := valnode.Start(t, bc1, valnode.Config{
 			NumValidators: 32,
 			StartIndex:    0,
 		})
-		valnode.Start(t, bc2, valnode.Config{
+		v2 := valnode.Start(t, bc2, valnode.Config{
 			NumValidators: 32,
 			StartIndex:    32,
 		})
@@ -99,13 +99,19 @@ func TestEthereum(t *testing.T) {
 
 		// Shut down everything so all goroutines exit cleanly.
 		// synctest requires all bubble goroutines to exit.
+		v1.Close()
+		v2.Close()
 		cl1.Close()
 		cl2.Close()
+		st1.ConnManager.Close()
+		st2.ConnManager.Close()
+		cl1Conn.Close()
+		cl2Conn.Close()
 		el1.Stack.Close()
 		el2.Stack.Close()
 		sn.Close()
 
 		// Allow time for all goroutines to process shutdown
-		time.Sleep(30 * time.Second)
+		time.Sleep(300 * time.Second)
 	})
 }
