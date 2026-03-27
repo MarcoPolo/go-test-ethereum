@@ -2,12 +2,14 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"testing"
 	"testing/synctest"
 	"time"
 
 	"github.com/ethereum/go-ethereum/core"
+	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/marcopolo/go-test-ethereum/pkg/clnode"
 	"github.com/marcopolo/go-test-ethereum/pkg/elnode"
@@ -18,10 +20,11 @@ import (
 )
 
 func TestEthereum(t *testing.T) {
+	const numNodes = 3
+	const numValidators = 64
+
 	synctest.Test(t, func(t *testing.T) {
-		// 1. Setup simnet with 4 endpoints:
-		//    - 2 for CL P2P (libp2p QUIC)
-		//    - 2 for EL P2P (TCP-over-QUIC streams)
+		// 1. Setup simnet
 		sn := &simnet.Simnet{
 			LatencyFunc: simnet.StaticLatency(1 * time.Millisecond),
 		}
@@ -29,121 +32,155 @@ func TestEthereum(t *testing.T) {
 			Downlink: simnet.LinkSettings{BitsPerSecond: 100 * simnet.Mibps},
 			Uplink:   simnet.LinkSettings{BitsPerSecond: 100 * simnet.Mibps},
 		}
-		cl1Conn := sn.NewEndpoint(&net.UDPAddr{IP: net.ParseIP("1.0.0.1"), Port: 9000}, ls)
-		cl2Conn := sn.NewEndpoint(&net.UDPAddr{IP: net.ParseIP("1.0.0.2"), Port: 9000}, ls)
-		el1Conn := sn.NewEndpoint(&net.UDPAddr{IP: net.ParseIP("1.0.0.1"), Port: 30303}, ls)
-		el2Conn := sn.NewEndpoint(&net.UDPAddr{IP: net.ParseIP("1.0.0.2"), Port: 30303}, ls)
+
+		// Create simnet endpoints: CL (port 9000) and EL (port 30303) per node
+		type simEndpoints struct {
+			cl *simnet.SimConn
+			el *simnet.SimConn
+		}
+		endpoints := make([]simEndpoints, numNodes)
+		for i := range endpoints {
+			ip := net.ParseIP(fmt.Sprintf("1.0.0.%d", i+1))
+			endpoints[i] = simEndpoints{
+				cl: sn.NewEndpoint(&net.UDPAddr{IP: ip, Port: 9000}, ls),
+				el: sn.NewEndpoint(&net.UDPAddr{IP: ip, Port: 30303}, ls),
+			}
+		}
 		sn.Start()
 
 		// 2. Generate genesis
 		gen := genesis.Generate(t, genesis.Config{
-			NumValidators: 64,
+			NumValidators: numValidators,
 			GenesisTime:   time.Now().Add(10 * time.Second),
 		})
 
-		// 3. Create EL P2P listeners (TCP-over-QUIC-over-simnet)
-		el1Lis, err := quicnet.NewQUICStreamListener(el1Conn)
-		if err != nil {
-			t.Fatalf("failed to create EL1 listener: %v", err)
-		}
-		el2Lis, err := quicnet.NewQUICStreamListener(el2Conn)
-		if err != nil {
-			t.Fatalf("failed to create EL2 listener: %v", err)
+		// 3. Create EL P2P listeners
+		elListeners := make([]*quicnet.QUICStreamListener, numNodes)
+		for i := range elListeners {
+			var err error
+			elListeners[i], err = quicnet.NewQUICStreamListener(endpoints[i].el)
+			if err != nil {
+				t.Fatalf("EL listener %d: %v", i, err)
+			}
 		}
 
-		// 4. Start 2 EL nodes with QUIC P2P
-		el2Addr := el2Conn.LocalAddr() // the simnet address of EL2
-		el1Addr := el1Conn.LocalAddr()
-		el1 := elnode.Start(t, gen.ELGenesis, elnode.Config{
-			ListenFunc: func(_, _ string) (net.Listener, error) { return el1Lis, nil },
-			Dialer: &elnode.QUICDialer{DialFunc: func(ctx context.Context, _ net.Addr) (net.Conn, error) {
-				// Always dial EL2's simnet address
-				return quicnet.DialQUICStream(ctx, el1Conn, el2Addr)
-			}},
-			ListenAddr: el1Addr.String(),
-		})
-		el2 := elnode.Start(t, gen.ELGenesis, elnode.Config{
-			ListenFunc: func(_, _ string) (net.Listener, error) { return el2Lis, nil },
-			Dialer: &elnode.QUICDialer{DialFunc: func(ctx context.Context, _ net.Addr) (net.Conn, error) {
-				// Always dial EL1's simnet address
-				return quicnet.DialQUICStream(ctx, el2Conn, el1Addr)
-			}},
-			ListenAddr: el2Addr.String(),
-		})
+		// 4. Start EL nodes with QUIC P2P
+		els := make([]*elnode.Node, numNodes)
+		for i := range els {
+			myConn := endpoints[i].el
+			// Build a dialer that routes to the correct peer based on address
+			peerAddrs := make(map[string]*simnet.SimConn)
+			for j := range endpoints {
+				if j != i {
+					peerAddrs[endpoints[j].el.LocalAddr().String()] = endpoints[i].el
+				}
+			}
+			lis := elListeners[i]
+			els[i] = elnode.Start(t, gen.ELGenesis, elnode.Config{
+				ListenFunc: func(_, _ string) (net.Listener, error) { return lis, nil },
+				Dialer: &elnode.QUICDialer{DialFunc: func(ctx context.Context, addr net.Addr) (net.Conn, error) {
+					return quicnet.DialQUICStream(ctx, myConn, addr)
+				}},
+				ListenAddr: myConn.LocalAddr().String(),
+			})
+		}
 
-		// Connect EL peers after a brief delay for server initialization
+		// Connect EL peers (full mesh)
 		time.Sleep(100 * time.Millisecond)
-		t.Logf("EL1 enode: %v", el1.Enode().URLv4())
-		t.Logf("EL2 enode: %v", el2.Enode().URLv4())
-		t.Logf("EL1 server peer count: %d", el1.Stack.Server().PeerCount())
-		el1.Stack.Server().AddPeer(el2.Enode())
-		el2.Stack.Server().AddPeer(el1.Enode())
+		for i := range els {
+			for j := range els {
+				if j != i {
+					els[i].Stack.Server().AddPeer(els[j].Enode())
+				}
+			}
+		}
 		time.Sleep(2 * time.Second)
-		t.Logf("EL1 peer count after add: %d", el1.Stack.Server().PeerCount())
-		t.Logf("EL2 peer count after add: %d", el2.Stack.Server().PeerCount())
-		t.Log("EL nodes started and peered")
+		for i, el := range els {
+			t.Logf("EL%d peer count: %d", i, el.Stack.Server().PeerCount())
+		}
 
 		// 5. Create CL QUIC transports
-		cl1Opts, st1, _ := quicnet.NewSimnetTransport(cl1Conn)
-		cl2Opts, st2, _ := quicnet.NewSimnetTransport(cl2Conn)
-
-		// 6. Start 2 CL nodes
-		bc1 := valnode.NewBufconnPair()
-		bc2 := valnode.NewBufconnPair()
-		cl1 := clnode.Start(t, clnode.Config{
-			GenesisState: gen.CLState, BeaconConfig: gen.BeaconConfig,
-			RPCClient: el1.Attach(), Libp2pOptions: cl1Opts,
-			GRPCListener: bc1.GRPCListener, HTTPListener: bc1.HTTPListener,
-		})
-		cl2 := clnode.Start(t, clnode.Config{
-			GenesisState: gen.CLState, BeaconConfig: gen.BeaconConfig,
-			RPCClient: el2.Attach(), Libp2pOptions: cl2Opts,
-			GRPCListener: bc2.GRPCListener, HTTPListener: bc2.HTTPListener,
-		})
-
-		// 7. Connect CL peers
-		time.Sleep(1 * time.Second)
-		p2p1 := cl1.P2PService()
-		p2p2 := cl2.P2PService()
-		if err := p2p1.Connect(peer.AddrInfo{ID: p2p2.Host().ID(), Addrs: p2p2.Host().Addrs()}); err != nil {
-			t.Fatalf("failed to connect CL peers: %v", err)
+		clOpts := make([][]libp2p.Option, numNodes)
+		clTransports := make([]*quicnet.SimnetTransport, numNodes)
+		for i := range clOpts {
+			var err error
+			clOpts[i], clTransports[i], err = quicnet.NewSimnetTransport(endpoints[i].cl)
+			if err != nil {
+				t.Fatalf("CL transport %d: %v", i, err)
+			}
 		}
-		t.Log("CL peers connected via QUIC over simnet")
 
-		// 8. Start validators (all 64 on CL1 for now to avoid conflicting proposals)
-		v1 := valnode.Start(t, bc1, valnode.Config{NumValidators: 64, StartIndex: 0})
-		_ = bc2 // CL2 runs without validators — just syncs via P2P
+		// 6. Start CL nodes
+		bcs := make([]*valnode.BufconnPair, numNodes)
+		cls := make([]*clnode.Node, numNodes)
+		for i := range cls {
+			bcs[i] = valnode.NewBufconnPair()
+			cls[i] = clnode.Start(t, clnode.Config{
+				GenesisState: gen.CLState, BeaconConfig: gen.BeaconConfig,
+				RPCClient: els[i].Attach(), Libp2pOptions: clOpts[i],
+				GRPCListener: bcs[i].GRPCListener, HTTPListener: bcs[i].HTTPListener,
+			})
+		}
+
+		// 7. Connect CL peers (full mesh)
+		time.Sleep(1 * time.Second)
+		for i := range cls {
+			for j := range cls {
+				if j > i {
+					p2pi := cls[i].P2PService()
+					p2pj := cls[j].P2PService()
+					if err := p2pi.Connect(peer.AddrInfo{ID: p2pj.Host().ID(), Addrs: p2pj.Host().Addrs()}); err != nil {
+						t.Logf("CL%d->CL%d connect: %v", i, j, err)
+					}
+				}
+			}
+		}
+		t.Log("All CL peers connected")
+
+		// 8. Start validators — all on CL0 for simplicity
+		v := valnode.Start(t, bcs[0], valnode.Config{
+			NumValidators: numValidators,
+			StartIndex:    0,
+		})
 
 		// 9. Wait for finality
 		t.Log("Waiting for finality...")
 		time.Sleep(800 * time.Second)
 
-		// 10. Assert finalized epoch on both nodes
-		e1 := cl1.FinalizedEpoch()
-		e2 := cl2.FinalizedEpoch()
-		t.Logf("Node 1 finalized epoch: %d, Node 2 finalized epoch: %d", e1, e2)
-		if e1 < 2 || e2 < 2 {
-			t.Fatalf("expected both nodes finalized epoch >= 2, got %d and %d", e1, e2)
+		// 10. Assert all nodes agree on finalized epoch
+		epochs := make([]uint64, numNodes)
+		for i, cl := range cls {
+			epochs[i] = cl.FinalizedEpoch()
+			t.Logf("Node %d finalized epoch: %d", i, epochs[i])
 		}
-		if e1 != e2 {
-			t.Fatalf("nodes disagree on finalized epoch: %d vs %d", e1, e2)
+		for i := range epochs {
+			if epochs[i] < 2 {
+				t.Fatalf("node %d: expected finalized epoch >= 2, got %d", i, epochs[i])
+			}
+			if epochs[i] != epochs[0] {
+				t.Fatalf("nodes disagree: node 0 epoch %d, node %d epoch %d", epochs[0], i, epochs[i])
+			}
 		}
-		t.Logf("SUCCESS: Both nodes agree on finalized epoch %d", e1)
+		t.Logf("SUCCESS: All %d nodes agree on finalized epoch %d", numNodes, epochs[0])
 
-		// Shutdown — order matters for clean goroutine exit
-		v1.Close()
-		cl1.Close()
-		cl2.Close()
-		st1.ConnManager.Close()
-		st2.ConnManager.Close()
-		el1Lis.Close()
-		el2Lis.Close()
-		cl1Conn.Close()
-		cl2Conn.Close()
-		el1Conn.Close()
-		el2Conn.Close()
-		el1.Stack.Close()
-		el2.Stack.Close()
+		// Shutdown
+		v.Close()
+		for _, cl := range cls {
+			cl.Close()
+		}
+		for _, st := range clTransports {
+			st.ConnManager.Close()
+		}
+		for _, ep := range endpoints {
+			ep.cl.Close()
+			ep.el.Close()
+		}
+		for _, lis := range elListeners {
+			lis.Close()
+		}
+		for _, el := range els {
+			el.Stack.Close()
+		}
 		core.SenderCacher().Close()
 		sn.Close()
 		time.Sleep(30 * time.Second)
