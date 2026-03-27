@@ -116,8 +116,9 @@ func TestEthereum(t *testing.T) {
 		// Need ~4 epochs for finality: justify epoch 0 at boundary of epoch 1,
 		// finalize epoch 0 at boundary of epoch 2. 32 slots × 4s = 128s/epoch.
 		// 4 epochs = 512s + genesis delay.
-		t.Log("Waiting for 4 epochs...")
-		time.Sleep(550 * time.Second)
+		// Need several epochs for finality. 32 slots × 4s = 128s/epoch.
+		t.Log("Waiting for 6 epochs...")
+		time.Sleep(800 * time.Second)
 
 		// TODO: Assert finalized epoch agreement
 		t.Log("Ethereum network ran for 2 epochs")
