@@ -153,7 +153,8 @@ func TestEthereum(t *testing.T) {
 		// 9. Wait for genesis + a few slots, then start tx spammer
 		time.Sleep(20 * time.Second) // past genesis (T+10) + a couple slots
 		spamCtx, spamCancel := context.WithCancel(context.Background())
-		txspam.Start(spamCtx, t, els[0].Attach(), big.NewInt(1337), 4*time.Second)
+		spamRPC := els[0].Attach()
+		txspam.Start(spamCtx, t, spamRPC, big.NewInt(1337), 4*time.Second)
 		t.Log("Transaction spammer started")
 
 		// 10. Wait for finality
@@ -178,6 +179,7 @@ func TestEthereum(t *testing.T) {
 
 		// Shutdown
 		spamCancel()
+		spamRPC.Close()
 		v.Close()
 		for _, cl := range cls {
 			cl.Close()

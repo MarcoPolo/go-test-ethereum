@@ -47,8 +47,9 @@ type Config struct {
 
 // Node wraps a Prysm beacon node.
 type Node struct {
-	Beacon *node.BeaconNode
-	cancel context.CancelFunc
+	Beacon    *node.BeaconNode
+	cancel    context.CancelFunc
+	rpcClient *rpc.Client
 }
 
 // genesisProvider implements genesis.Provider using an in-memory beacon state.
@@ -154,8 +155,9 @@ func Start(t *testing.T, cfg Config) *Node {
 	go beacon.Start()
 
 	return &Node{
-		Beacon: beacon,
-		cancel: cancel,
+		Beacon:    beacon,
+		cancel:    cancel,
+		rpcClient: cfg.RPCClient,
 	}
 }
 
@@ -163,6 +165,9 @@ func Start(t *testing.T, cfg Config) *Node {
 func (n *Node) Close() {
 	n.cancel()
 	n.Beacon.Close()
+	if n.rpcClient != nil {
+		n.rpcClient.Close()
+	}
 }
 
 // P2PService returns the P2P service from the beacon node.
