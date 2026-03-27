@@ -101,7 +101,7 @@ func TestEthereum(t *testing.T) {
 				}
 			}
 		}
-		time.Sleep(2 * time.Second)
+		time.Sleep(5 * time.Second)
 		for i, el := range els {
 			t.Logf("EL%d peer count: %d", i, el.Stack.Server().PeerCount())
 		}

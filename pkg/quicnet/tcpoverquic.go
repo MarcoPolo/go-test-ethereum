@@ -95,8 +95,14 @@ type quicStreamConn struct {
 	remote net.Addr
 }
 
-func (c *quicStreamConn) LocalAddr() net.Addr  { return c.local }
-func (c *quicStreamConn) RemoteAddr() net.Addr { return c.remote }
+func (c *quicStreamConn) LocalAddr() net.Addr { return c.local }
+func (c *quicStreamConn) RemoteAddr() net.Addr {
+	// Return TCPAddr so geth's nodeFromConn can extract IP/port.
+	if udp, ok := c.remote.(*net.UDPAddr); ok {
+		return &net.TCPAddr{IP: udp.IP, Port: udp.Port}
+	}
+	return c.remote
+}
 
 func generateTLSConfig() *tls.Config {
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)

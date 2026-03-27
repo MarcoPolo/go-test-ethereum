@@ -94,6 +94,9 @@ func TestQUICSynctestGeth(t *testing.T) {
 		el1.Stack.Server().LocalNode().SetStaticIP(net.ParseIP("1.0.0.1"))
 		el2.Stack.Server().LocalNode().SetStaticIP(net.ParseIP("1.0.0.2"))
 
+		// Wait for geth to fully start
+		time.Sleep(2 * time.Second)
+
 		// Try geth's AddPeer
 		el1.Stack.Server().AddPeer(el2.Enode())
 

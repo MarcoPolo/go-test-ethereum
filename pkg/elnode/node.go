@@ -133,12 +133,5 @@ func (d *QUICDialer) Dial(ctx context.Context, dest *enode.Node) (net.Conn, erro
 		IP:   net.ParseIP(ep.Addr().String()),
 		Port: int(ep.Port()),
 	}
-	println("QUICDialer.Dial called:", addr.String())
-	conn, err := d.DialFunc(ctx, addr)
-	if err != nil {
-		println("QUICDialer.Dial failed:", err.Error())
-	} else {
-		println("QUICDialer.Dial succeeded")
-	}
-	return conn, err
+	return d.DialFunc(ctx, addr)
 }
