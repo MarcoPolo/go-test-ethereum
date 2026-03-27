@@ -55,6 +55,8 @@ func Generate(t *testing.T, cfg Config) *Result {
 	beaconCfg.GenesisDelay = 0
 	beaconCfg.MinGenesisTime = uint64(cfg.GenesisTime.Unix())
 	beaconCfg.MinGenesisActiveValidatorCount = cfg.NumValidators
+	beaconCfg.DepositChainID = 1337
+	beaconCfg.DepositNetworkID = 1337
 	beaconCfg.ConfigName = "interop"
 	beaconCfg.InitializeForkSchedule()
 	params.OverrideBeaconConfig(beaconCfg)
