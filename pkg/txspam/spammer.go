@@ -44,31 +44,28 @@ func Start(ctx context.Context, t *testing.T, rpcClient *rpc.Client, chainID *bi
 	client := ethclient.NewClient(rpcClient)
 
 	go func() {
-		var nonce uint64
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 
+		sender := TestAddress()
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				// Alternate between regular txs and blob txs
-				var err error
+				nonce, err := client.PendingNonceAt(ctx, sender)
+				if err != nil {
+					continue
+				}
+				// Every 5th tx is a blob tx
 				if nonce%5 == 4 {
 					err = sendBlobTx(ctx, client, chainID, nonce)
-					if err != nil {
-						// Blob tx failed — send regular tx at same nonce to avoid gap
-						err = sendTransferTx(ctx, client, chainID, nonce)
-					}
 				} else {
 					err = sendTransferTx(ctx, client, chainID, nonce)
 				}
 				if err != nil {
 					t.Logf("tx send error (nonce=%d): %v", nonce, err)
-					continue
 				}
-				nonce++
 			}
 		}
 	}()
