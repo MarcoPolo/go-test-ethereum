@@ -7,7 +7,6 @@ import (
 	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
-	"log"
 	"math/big"
 	"net"
 	"time"
@@ -63,19 +62,14 @@ type quicStreamListener struct {
 }
 
 func (l *quicStreamListener) Accept() (net.Conn, error) {
-	log.Printf("quicStreamListener.Accept: waiting for connection on %s", l.addr)
 	qconn, err := l.ql.Accept(context.Background())
 	if err != nil {
-		log.Printf("quicStreamListener.Accept: ql.Accept error: %v", err)
 		return nil, err
 	}
-	log.Printf("quicStreamListener.Accept: got QUIC conn from %s", qconn.RemoteAddr())
 	stream, err := qconn.AcceptStream(context.Background())
 	if err != nil {
-		log.Printf("quicStreamListener.Accept: AcceptStream error: %v", err)
 		return nil, err
 	}
-	log.Printf("quicStreamListener.Accept: got stream from %s", qconn.RemoteAddr())
 	return &quicStreamConn{Stream: stream, local: l.addr, remote: qconn.RemoteAddr()}, nil
 }
 
@@ -102,6 +96,14 @@ func (c *quicStreamConn) RemoteAddr() net.Addr {
 		return &net.TCPAddr{IP: udp.IP, Port: udp.Port}
 	}
 	return c.remote
+}
+
+// Close fully closes both read and write sides of the QUIC stream.
+// quic.Stream.Close() only closes the write side; we also need to
+// cancel reads so the remote side's Read() returns an error.
+func (c *quicStreamConn) Close() error {
+	c.Stream.CancelRead(0)
+	return c.Stream.Close()
 }
 
 func generateTLSConfig() *tls.Config {

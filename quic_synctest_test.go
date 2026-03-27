@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"net"
 	"testing"
 	"testing/synctest"
@@ -55,7 +56,84 @@ func TestQUICSynctestDial(t *testing.T) {
 	})
 }
 
-// Geth EL nodes under synctest — peer connection fails
+// Geth EL nodes with 3 nodes — reproduces the peer connection issue
+func TestQUICSynctestGeth3(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		fuluEra := time.Unix(1764798551, 0)
+		time.Sleep(fuluEra.Sub(time.Now()))
+
+		sn := &simnet.Simnet{LatencyFunc: simnet.StaticLatency(1 * time.Millisecond)}
+		ls := simnet.NodeBiDiLinkSettings{
+			Downlink: simnet.LinkSettings{BitsPerSecond: 100 * simnet.Mibps},
+			Uplink:   simnet.LinkSettings{BitsPerSecond: 100 * simnet.Mibps},
+		}
+
+		conns := make([]*simnet.SimConn, 3)
+		trs := make([]*quicnet.ELTransport, 3)
+		for i := range conns {
+			conns[i] = sn.NewEndpoint(&net.UDPAddr{IP: net.ParseIP(fmt.Sprintf("1.0.0.%d", i+1)), Port: 30303}, ls)
+		}
+		sn.Start()
+
+		gen := genesis.Generate(t, genesis.Config{NumValidators: 64, GenesisTime: time.Now().Add(10 * time.Second)})
+
+		els := make([]*elnode.Node, 3)
+		for i := range els {
+			var err error
+			trs[i], err = quicnet.NewELTransport(conns[i])
+			if err != nil {
+				t.Fatal(err)
+			}
+			els[i] = elnode.Start(t, gen.ELGenesis, elnode.Config{
+				ListenFunc: func(_, _ string) (net.Listener, error) { return trs[i].Listener(), nil },
+				Dialer:     &elnode.QUICDialer{DialFunc: trs[i].Dial},
+				ListenAddr: conns[i].LocalAddr().String(),
+			})
+			els[i].Stack.Server().LocalNode().SetStaticIP(net.ParseIP(fmt.Sprintf("1.0.0.%d", i+1)))
+		}
+
+		time.Sleep(2 * time.Second)
+
+		// Full mesh AddPeer
+		for i := range els {
+			for j := range els {
+				if j != i {
+					els[i].Stack.Server().AddPeer(els[j].Enode())
+				}
+			}
+		}
+
+		time.Sleep(10 * time.Second)
+		for i, el := range els {
+			t.Logf("EL%d peers: %d", i, el.Stack.Server().PeerCount())
+		}
+
+		allConnected := true
+		for _, el := range els {
+			if el.Stack.Server().PeerCount() < 2 {
+				allConnected = false
+			}
+		}
+		if !allConnected {
+			t.Fatal("Not all EL nodes connected")
+		}
+
+		for _, el := range els {
+			el.Stack.Close()
+		}
+		for _, tr := range trs {
+			tr.Close()
+		}
+		for _, c := range conns {
+			c.Close()
+		}
+		core.SenderCacher().Close()
+		sn.Close()
+		time.Sleep(5 * time.Second)
+	})
+}
+
+// Geth EL nodes under synctest — 2-node version works
 func TestQUICSynctestGeth(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		fuluEra := time.Unix(1764798551, 0)

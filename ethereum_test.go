@@ -94,12 +94,9 @@ func TestEthereum(t *testing.T) {
 		for i, el := range els {
 			t.Logf("EL%d enode: %s  listen: %s", i, el.Enode().URLv4(), endpoints[i].el.LocalAddr())
 		}
-		for i := range els {
-			for j := range els {
-				if j != i {
-					els[i].Stack.Server().AddPeer(els[j].Enode())
-				}
-			}
+		// Only add peers in one direction to avoid DiscAlreadyConnected race
+		for j := 1; j < len(els); j++ {
+			els[0].Stack.Server().AddPeer(els[j].Enode())
 		}
 		time.Sleep(5 * time.Second)
 		for i, el := range els {
