@@ -7,7 +7,6 @@ import (
 	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
-	"fmt"
 	"math/big"
 	"net"
 	"time"
@@ -16,23 +15,53 @@ import (
 	"github.com/quic-go/quic-go"
 )
 
-// QUICStreamListener implements net.Listener using QUIC streams over simnet.
-type QUICStreamListener struct {
+// ELTransport provides both listener and dialer over a single QUIC transport on simnet.
+type ELTransport struct {
+	tr  *quic.Transport
+	ql  *quic.Listener
+	tls *tls.Config
+	addr net.Addr
+}
+
+// NewELTransport creates a shared QUIC transport for EL P2P over a simnet connection.
+func NewELTransport(conn *simnet.SimConn) (*ELTransport, error) {
+	tlsConf := generateTLSConfig()
+	tr := &quic.Transport{Conn: conn}
+	ql, err := tr.Listen(tlsConf, &quic.Config{})
+	if err != nil {
+		return nil, err
+	}
+	return &ELTransport{tr: tr, ql: ql, tls: tlsConf, addr: conn.LocalAddr()}, nil
+}
+
+// Listener returns a net.Listener backed by QUIC streams.
+func (t *ELTransport) Listener() net.Listener {
+	return &quicStreamListener{ql: t.ql, addr: t.addr}
+}
+
+// Dial opens a QUIC stream to the given address, returning a net.Conn.
+func (t *ELTransport) Dial(ctx context.Context, addr net.Addr) (net.Conn, error) {
+	tlsConf := &tls.Config{InsecureSkipVerify: true, NextProtos: []string{"devp2p"}}
+	qconn, err := t.tr.Dial(ctx, addr, tlsConf, &quic.Config{})
+	if err != nil {
+		return nil, err
+	}
+	stream, err := qconn.OpenStreamSync(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &quicStreamConn{Stream: stream, local: t.addr, remote: addr}, nil
+}
+
+func (t *ELTransport) Close() error { return t.ql.Close() }
+
+// quicStreamListener implements net.Listener using QUIC streams.
+type quicStreamListener struct {
 	ql   *quic.Listener
 	addr net.Addr
 }
 
-// NewQUICStreamListener creates a net.Listener backed by QUIC over a simnet connection.
-func NewQUICStreamListener(conn *simnet.SimConn) (*QUICStreamListener, error) {
-	tr := &quic.Transport{Conn: conn}
-	ql, err := tr.Listen(generateTLSConfig(), &quic.Config{})
-	if err != nil {
-		return nil, fmt.Errorf("quic listen: %w", err)
-	}
-	return &QUICStreamListener{ql: ql, addr: conn.LocalAddr()}, nil
-}
-
-func (l *QUICStreamListener) Accept() (net.Conn, error) {
+func (l *quicStreamListener) Accept() (net.Conn, error) {
 	qconn, err := l.ql.Accept(context.Background())
 	if err != nil {
 		return nil, err
@@ -44,29 +73,13 @@ func (l *QUICStreamListener) Accept() (net.Conn, error) {
 	return &quicStreamConn{Stream: stream, local: l.addr, remote: qconn.RemoteAddr()}, nil
 }
 
-func (l *QUICStreamListener) Close() error { return l.ql.Close() }
-func (l *QUICStreamListener) Addr() net.Addr {
-	// Return a TCPAddr so geth's setupListening recognizes the port.
+func (l *quicStreamListener) Close() error { return l.ql.Close() }
+func (l *quicStreamListener) Addr() net.Addr {
 	udp, ok := l.addr.(*net.UDPAddr)
 	if ok {
 		return &net.TCPAddr{IP: udp.IP, Port: udp.Port}
 	}
 	return l.addr
-}
-
-// DialQUICStream dials a QUIC connection and opens a stream, returning a net.Conn.
-func DialQUICStream(ctx context.Context, conn *simnet.SimConn, remoteAddr net.Addr) (net.Conn, error) {
-	tr := &quic.Transport{Conn: conn}
-	tlsConf := &tls.Config{InsecureSkipVerify: true, NextProtos: []string{"devp2p"}}
-	qconn, err := tr.Dial(ctx, remoteAddr, tlsConf, &quic.Config{})
-	if err != nil {
-		return nil, fmt.Errorf("quic dial: %w", err)
-	}
-	stream, err := qconn.OpenStreamSync(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("open stream: %w", err)
-	}
-	return &quicStreamConn{Stream: stream, local: conn.LocalAddr(), remote: remoteAddr}, nil
 }
 
 // quicStreamConn wraps a *quic.Stream to implement net.Conn.

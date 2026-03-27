@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"net"
 	"testing"
@@ -54,39 +53,39 @@ func TestEthereum(t *testing.T) {
 			GenesisTime:   time.Now().Add(10 * time.Second),
 		})
 
-		// 3. Create EL P2P listeners
-		elListeners := make([]*quicnet.QUICStreamListener, numNodes)
-		for i := range elListeners {
+		// 3. Create EL transports (shared QUIC transport per node for listen + dial)
+		elTransports := make([]*quicnet.ELTransport, numNodes)
+		for i := range elTransports {
 			var err error
-			elListeners[i], err = quicnet.NewQUICStreamListener(endpoints[i].el)
+			elTransports[i], err = quicnet.NewELTransport(endpoints[i].el)
 			if err != nil {
-				t.Fatalf("EL listener %d: %v", i, err)
+				t.Fatalf("EL transport %d: %v", i, err)
 			}
 		}
 
 		// 4. Start EL nodes with QUIC P2P
 		els := make([]*elnode.Node, numNodes)
 		for i := range els {
-			myConn := endpoints[i].el
-			// Build a dialer that routes to the correct peer based on address
-			peerAddrs := make(map[string]*simnet.SimConn)
-			for j := range endpoints {
-				if j != i {
-					peerAddrs[endpoints[j].el.LocalAddr().String()] = endpoints[i].el
-				}
-			}
-			lis := elListeners[i]
+			elTr := elTransports[i]
+			lis := elTr.Listener()
 			els[i] = elnode.Start(t, gen.ELGenesis, elnode.Config{
 				ListenFunc: func(_, _ string) (net.Listener, error) { return lis, nil },
-				Dialer: &elnode.QUICDialer{DialFunc: func(ctx context.Context, addr net.Addr) (net.Conn, error) {
-					return quicnet.DialQUICStream(ctx, myConn, addr)
-				}},
-				ListenAddr: myConn.LocalAddr().String(),
+				Dialer: &elnode.QUICDialer{DialFunc: elTr.Dial},
+				ListenAddr: endpoints[i].el.LocalAddr().String(),
 			})
+		}
+
+		// Set correct IP on each EL's enode so peers can find each other.
+		for i, el := range els {
+			udpAddr := endpoints[i].el.LocalAddr().(*net.UDPAddr)
+			el.Stack.Server().LocalNode().SetStaticIP(udpAddr.IP)
 		}
 
 		// Connect EL peers (full mesh)
 		time.Sleep(100 * time.Millisecond)
+		for i, el := range els {
+			t.Logf("EL%d enode: %s  listen: %s", i, el.Enode().URLv4(), endpoints[i].el.LocalAddr())
+		}
 		for i := range els {
 			for j := range els {
 				if j != i {
@@ -175,8 +174,8 @@ func TestEthereum(t *testing.T) {
 			ep.cl.Close()
 			ep.el.Close()
 		}
-		for _, lis := range elListeners {
-			lis.Close()
+		for _, tr := range elTransports {
+			tr.Close()
 		}
 		for _, el := range els {
 			el.Stack.Close()
