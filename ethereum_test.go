@@ -70,8 +70,16 @@ func TestEthereum(t *testing.T) {
 			ListenAddr: el2Addr.String(),
 		})
 
-		// Connect EL peers
+		// Connect EL peers after a brief delay for server initialization
+		time.Sleep(100 * time.Millisecond)
+		t.Logf("EL1 enode: %v", el1.Enode().URLv4())
+		t.Logf("EL2 enode: %v", el2.Enode().URLv4())
+		t.Logf("EL1 server peer count: %d", el1.Stack.Server().PeerCount())
 		el1.Stack.Server().AddPeer(el2.Enode())
+		el2.Stack.Server().AddPeer(el1.Enode())
+		time.Sleep(2 * time.Second)
+		t.Logf("EL1 peer count after add: %d", el1.Stack.Server().PeerCount())
+		t.Logf("EL2 peer count after add: %d", el2.Stack.Server().PeerCount())
 		t.Log("EL nodes started and peered")
 
 		// 5. Create CL QUIC transports

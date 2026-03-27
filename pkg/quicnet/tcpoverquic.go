@@ -44,8 +44,15 @@ func (l *QUICStreamListener) Accept() (net.Conn, error) {
 	return &quicStreamConn{Stream: stream, local: l.addr, remote: qconn.RemoteAddr()}, nil
 }
 
-func (l *QUICStreamListener) Close() error   { return l.ql.Close() }
-func (l *QUICStreamListener) Addr() net.Addr { return l.addr }
+func (l *QUICStreamListener) Close() error { return l.ql.Close() }
+func (l *QUICStreamListener) Addr() net.Addr {
+	// Return a TCPAddr so geth's setupListening recognizes the port.
+	udp, ok := l.addr.(*net.UDPAddr)
+	if ok {
+		return &net.TCPAddr{IP: udp.IP, Port: udp.Port}
+	}
+	return l.addr
+}
 
 // DialQUICStream dials a QUIC connection and opens a stream, returning a net.Conn.
 func DialQUICStream(ctx context.Context, conn *simnet.SimConn, remoteAddr net.Addr) (net.Conn, error) {
