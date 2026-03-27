@@ -113,8 +113,11 @@ func TestEthereum(t *testing.T) {
 		t.Log("Validators started")
 
 		// 8. Wait for 2 epochs (synctest advances time when goroutines block)
-		t.Log("Waiting for 2 epochs...")
-		time.Sleep(270 * time.Second)
+		// Need ~4 epochs for finality: justify epoch 0 at boundary of epoch 1,
+		// finalize epoch 0 at boundary of epoch 2. 32 slots × 4s = 128s/epoch.
+		// 4 epochs = 512s + genesis delay.
+		t.Log("Waiting for 4 epochs...")
+		time.Sleep(550 * time.Second)
 
 		// TODO: Assert finalized epoch agreement
 		t.Log("Ethereum network ran for 2 epochs")

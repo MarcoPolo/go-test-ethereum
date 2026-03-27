@@ -34,7 +34,7 @@ func (w *wrappedQUICTransport) Listen(tlsConf *tls.Config, conf *quic.Config) (q
 	return w.tr.Listen(tlsConf, conf)
 }
 
-func (w *wrappedQUICTransport) Dial(ctx context.Context, addr net.Addr, tlsConf *tls.Config, conf *quic.Config) (quic.Connection, error) {
+func (w *wrappedQUICTransport) Dial(ctx context.Context, addr net.Addr, tlsConf *tls.Config, conf *quic.Config) (*quic.Conn, error) {
 	return w.tr.Dial(ctx, addr, tlsConf, conf)
 }
 
