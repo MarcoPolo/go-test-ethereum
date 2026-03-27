@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"net"
 	"testing"
 	"testing/synctest"
@@ -17,7 +18,9 @@ import (
 
 func TestEthereum(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		// 1. Setup simnet
+		// 1. Setup simnet with 4 endpoints:
+		//    - 2 for CL P2P (libp2p QUIC)
+		//    - 2 for EL P2P (TCP-over-QUIC streams)
 		sn := &simnet.Simnet{
 			LatencyFunc: simnet.StaticLatency(1 * time.Millisecond),
 		}
@@ -27,6 +30,8 @@ func TestEthereum(t *testing.T) {
 		}
 		cl1Conn := sn.NewEndpoint(&net.UDPAddr{IP: net.ParseIP("1.0.0.1"), Port: 9000}, ls)
 		cl2Conn := sn.NewEndpoint(&net.UDPAddr{IP: net.ParseIP("1.0.0.2"), Port: 9000}, ls)
+		el1Conn := sn.NewEndpoint(&net.UDPAddr{IP: net.ParseIP("1.0.0.1"), Port: 30303}, ls)
+		el2Conn := sn.NewEndpoint(&net.UDPAddr{IP: net.ParseIP("1.0.0.2"), Port: 30303}, ls)
 		sn.Start()
 
 		// 2. Generate genesis
@@ -35,15 +40,45 @@ func TestEthereum(t *testing.T) {
 			GenesisTime:   time.Now().Add(10 * time.Second),
 		})
 
-		// 3. Start 2 separate EL nodes (each CL gets its own EL)
-		el1 := elnode.Start(t, gen.ELGenesis)
-		el2 := elnode.Start(t, gen.ELGenesis)
+		// 3. Create EL P2P listeners (TCP-over-QUIC-over-simnet)
+		el1Lis, err := quicnet.NewQUICStreamListener(el1Conn)
+		if err != nil {
+			t.Fatalf("failed to create EL1 listener: %v", err)
+		}
+		el2Lis, err := quicnet.NewQUICStreamListener(el2Conn)
+		if err != nil {
+			t.Fatalf("failed to create EL2 listener: %v", err)
+		}
 
-		// 4. Create QUIC transports
+		// 4. Start 2 EL nodes with QUIC P2P
+		el2Addr := el2Conn.LocalAddr() // the simnet address of EL2
+		el1Addr := el1Conn.LocalAddr()
+		el1 := elnode.Start(t, gen.ELGenesis, elnode.Config{
+			ListenFunc: func(_, _ string) (net.Listener, error) { return el1Lis, nil },
+			Dialer: &elnode.QUICDialer{DialFunc: func(ctx context.Context, _ net.Addr) (net.Conn, error) {
+				// Always dial EL2's simnet address
+				return quicnet.DialQUICStream(ctx, el1Conn, el2Addr)
+			}},
+			ListenAddr: el1Addr.String(),
+		})
+		el2 := elnode.Start(t, gen.ELGenesis, elnode.Config{
+			ListenFunc: func(_, _ string) (net.Listener, error) { return el2Lis, nil },
+			Dialer: &elnode.QUICDialer{DialFunc: func(ctx context.Context, _ net.Addr) (net.Conn, error) {
+				// Always dial EL1's simnet address
+				return quicnet.DialQUICStream(ctx, el2Conn, el1Addr)
+			}},
+			ListenAddr: el2Addr.String(),
+		})
+
+		// Connect EL peers
+		el1.Stack.Server().AddPeer(el2.Enode())
+		t.Log("EL nodes started and peered")
+
+		// 5. Create CL QUIC transports
 		cl1Opts, st1, _ := quicnet.NewSimnetTransport(cl1Conn)
 		cl2Opts, st2, _ := quicnet.NewSimnetTransport(cl2Conn)
 
-		// 5. Start 2 CL nodes
+		// 6. Start 2 CL nodes
 		bc1 := valnode.NewBufconnPair()
 		bc2 := valnode.NewBufconnPair()
 		cl1 := clnode.Start(t, clnode.Config{
@@ -57,31 +92,34 @@ func TestEthereum(t *testing.T) {
 			GRPCListener: bc2.GRPCListener, HTTPListener: bc2.HTTPListener,
 		})
 
-		// 6. Connect CL peers over simnet QUIC
+		// 7. Connect CL peers
 		time.Sleep(1 * time.Second)
 		p2p1 := cl1.P2PService()
 		p2p2 := cl2.P2PService()
-		if p2p1 != nil && p2p2 != nil && p2p2.Host() != nil {
-			if err := p2p1.Connect(peer.AddrInfo{ID: p2p2.Host().ID(), Addrs: p2p2.Host().Addrs()}); err != nil {
-				t.Fatalf("failed to connect peers: %v", err)
-			}
-			t.Log("CL peers connected via QUIC over simnet")
+		if err := p2p1.Connect(peer.AddrInfo{ID: p2p2.Host().ID(), Addrs: p2p2.Host().Addrs()}); err != nil {
+			t.Fatalf("failed to connect CL peers: %v", err)
 		}
+		t.Log("CL peers connected via QUIC over simnet")
 
-		// 7. Start validators (32 each)
+		// 8. Start validators (32 each)
 		v1 := valnode.Start(t, bc1, valnode.Config{NumValidators: 32, StartIndex: 0})
 		v2 := valnode.Start(t, bc2, valnode.Config{NumValidators: 32, StartIndex: 32})
 
-		// 8. Wait for finality (need ~4 epochs, 32 slots × 4s = 128s/epoch)
+		// 9. Wait for finality
 		t.Log("Waiting for finality...")
 		time.Sleep(800 * time.Second)
 
-		// 9. Assert finalized epoch
-		epoch := cl1.FinalizedEpoch()
-		t.Logf("Finalized epoch: %d", epoch)
-		if epoch < 2 {
-			t.Fatalf("expected finalized epoch >= 2, got %d", epoch)
+		// 10. Assert finalized epoch on both nodes
+		e1 := cl1.FinalizedEpoch()
+		e2 := cl2.FinalizedEpoch()
+		t.Logf("Node 1 finalized epoch: %d, Node 2 finalized epoch: %d", e1, e2)
+		if e1 < 2 || e2 < 2 {
+			t.Fatalf("expected both nodes finalized epoch >= 2, got %d and %d", e1, e2)
 		}
+		if e1 != e2 {
+			t.Fatalf("nodes disagree on finalized epoch: %d vs %d", e1, e2)
+		}
+		t.Logf("SUCCESS: Both nodes agree on finalized epoch %d", e1)
 
 		// Shutdown
 		v1.Close()
