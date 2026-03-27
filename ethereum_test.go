@@ -50,7 +50,12 @@ func TestEthereum(t *testing.T) {
 		}
 		sn.Start()
 
-		// 2. Generate genesis
+		// 2. Advance synctest clock to a realistic Fulu-era time.
+		// synctest starts at 2000-01-01. Sleep to jump to ~2025-12-03.
+		fuluEra := time.Unix(1764798551, 0)
+		time.Sleep(fuluEra.Sub(time.Now()))
+
+		// 3. Generate genesis (10s after current fake time)
 		gen := genesis.Generate(t, genesis.Config{
 			NumValidators: numValidators,
 			GenesisTime:   time.Now().Add(10 * time.Second),
