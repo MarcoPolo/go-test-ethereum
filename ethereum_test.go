@@ -146,6 +146,6 @@ func TestEthereum(t *testing.T) {
 		el2.Stack.Close()
 		core.SenderCacher().Close()
 		sn.Close()
-		time.Sleep(300 * time.Second)
+		time.Sleep(30 * time.Second)
 	})
 }
