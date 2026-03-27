@@ -3,12 +3,16 @@ package genesis
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/binary"
 	"math/big"
 	"testing"
 	"time"
 
+	"github.com/OffchainLabs/prysm/v7/beacon-chain/core/helpers"
 	"github.com/OffchainLabs/prysm/v7/beacon-chain/state"
 	"github.com/OffchainLabs/prysm/v7/config/params"
+	"github.com/OffchainLabs/prysm/v7/consensus-types/primitives"
 	"github.com/OffchainLabs/prysm/v7/runtime/interop"
 	"github.com/OffchainLabs/prysm/v7/runtime/version"
 	"github.com/ethereum/go-ethereum/common"
@@ -89,6 +93,28 @@ func Generate(t *testing.T, cfg Config) *Result {
 	)
 	if err != nil {
 		t.Fatalf("failed to generate CL genesis state: %v", err)
+	}
+
+	// Seed RANDAO mixes so proposer selection is well-distributed from epoch 0.
+	for i := uint64(0); i < uint64(params.BeaconConfig().EpochsPerHistoricalVector); i++ {
+		var seed [32]byte
+		binary.LittleEndian.PutUint64(seed[:], i)
+		seed = sha256.Sum256(seed[:])
+		if err := clState.UpdateRandaoMixesAtIndex(i, seed); err != nil {
+			t.Fatalf("failed to seed RANDAO mix %d: %v", i, err)
+		}
+	}
+	// Recompute proposer lookahead using the new RANDAO mixes.
+	lookahead, err := helpers.InitializeProposerLookahead(context.Background(), clState, 0)
+	if err != nil {
+		t.Fatalf("failed to recompute proposer lookahead: %v", err)
+	}
+	valIndices := make([]primitives.ValidatorIndex, len(lookahead))
+	for i, v := range lookahead {
+		valIndices[i] = primitives.ValidatorIndex(v)
+	}
+	if err := clState.SetProposerLookahead(valIndices); err != nil {
+		t.Fatalf("failed to set proposer lookahead: %v", err)
 	}
 
 	return &Result{

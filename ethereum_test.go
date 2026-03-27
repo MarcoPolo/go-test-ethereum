@@ -12,6 +12,7 @@ import (
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/sirupsen/logrus"
 	"github.com/marcopolo/go-test-ethereum/pkg/clnode"
 	"github.com/marcopolo/go-test-ethereum/pkg/elnode"
 	"github.com/marcopolo/go-test-ethereum/pkg/genesis"
@@ -24,6 +25,13 @@ import (
 func TestEthereum(t *testing.T) {
 	const numNodes = 3
 	const numValidators = 64
+
+	// Use full timestamps in logrus output. The default relative timestamp
+	// (seconds since process start) is meaningless under synctest because
+	// the fake clock and the real clock used at package init diverge.
+	if f, ok := logrus.StandardLogger().Formatter.(*logrus.TextFormatter); ok {
+		f.FullTimestamp = true
+	}
 
 	synctest.Test(t, func(t *testing.T) {
 		// 1. Setup simnet
@@ -94,9 +102,11 @@ func TestEthereum(t *testing.T) {
 		for i, el := range els {
 			t.Logf("EL%d enode: %s  listen: %s", i, el.Enode().URLv4(), endpoints[i].el.LocalAddr())
 		}
-		// Only add peers in one direction to avoid DiscAlreadyConnected race
-		for j := 1; j < len(els); j++ {
-			els[0].Stack.Server().AddPeer(els[j].Enode())
+		// Connect as full mesh — smaller IP dials larger to avoid DiscAlreadyConnected race
+		for i := range els {
+			for j := i + 1; j < len(els); j++ {
+				els[i].Stack.Server().AddPeer(els[j].Enode())
+			}
 		}
 		time.Sleep(5 * time.Second)
 		for i, el := range els {
@@ -141,11 +151,18 @@ func TestEthereum(t *testing.T) {
 		}
 		t.Log("All CL peers connected")
 
-		// 8. Start validators — all on CL0 for simplicity
-		v := valnode.Start(t, bcs[0], valnode.Config{
-			NumValidators: numValidators,
-			StartIndex:    0,
-		})
+		// 8. Start validators — round-robin across all CL nodes
+		nodeIndices := make([][]uint64, numNodes)
+		for v := 0; v < numValidators; v++ {
+			node := v % numNodes
+			nodeIndices[node] = append(nodeIndices[node], uint64(v))
+		}
+		vals := make([]*valnode.ValNode, numNodes)
+		for i := range vals {
+			vals[i] = valnode.Start(t, bcs[i], valnode.Config{
+				Indices: nodeIndices[i],
+			})
+		}
 
 		// 9. Wait for genesis + a few slots, then start tx spammer
 		time.Sleep(20 * time.Second) // past genesis (T+10) + a couple slots
@@ -177,7 +194,9 @@ func TestEthereum(t *testing.T) {
 		// Shutdown
 		spamCancel()
 		spamRPC.Close()
-		v.Close()
+		for _, v := range vals {
+			v.Close()
+		}
 		for _, cl := range cls {
 			cl.Close()
 		}

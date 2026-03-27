@@ -27,6 +27,7 @@ const bufSize = 1024 * 1024
 type Config struct {
 	NumValidators uint64
 	StartIndex    uint64
+	Indices       []uint64 // If set, use these specific validator indices (overrides StartIndex/NumValidators)
 	DataDir       string
 }
 
@@ -175,14 +176,19 @@ func Start(t *testing.T, bc *BufconnPair, cfg Config) *ValNode {
 
 	ctx, cancel := context.WithCancel(context.Background())
 
+	kmConfig := &local.InteropKeymanagerConfig{
+		Offset:           cfg.StartIndex,
+		NumValidatorKeys: cfg.NumValidators,
+	}
+	if len(cfg.Indices) > 0 {
+		kmConfig = &local.InteropKeymanagerConfig{Indices: cfg.Indices}
+	}
+
 	validatorService, err := client.NewValidatorService(ctx, &client.Config{
 		DB:                     valDB,
 		Conn:                   nodeConn,
 		GRPCMaxCallRecvMsgSize: 10 * 1024 * 1024, // 10MB
-		InteropKmConfig: &local.InteropKeymanagerConfig{
-			Offset:           cfg.StartIndex,
-			NumValidatorKeys: cfg.NumValidators,
-		},
+		InteropKmConfig:        kmConfig,
 		GraffitiStruct:          &g.Graffiti{},
 		LogValidatorPerformance: true,
 		CloseClientFunc:         func() { cancel() },
@@ -192,7 +198,11 @@ func Start(t *testing.T, bc *BufconnPair, cfg Config) *ValNode {
 	}
 
 	go validatorService.Start()
-	t.Log(fmt.Sprintf("Validator service started (indices %d-%d)", cfg.StartIndex, cfg.StartIndex+cfg.NumValidators-1))
+	if len(cfg.Indices) > 0 {
+		t.Logf("Validator service started (%d validators, round-robin indices)", len(cfg.Indices))
+	} else {
+		t.Log(fmt.Sprintf("Validator service started (indices %d-%d)", cfg.StartIndex, cfg.StartIndex+cfg.NumValidators-1))
+	}
 
 	return &ValNode{
 		cancel:   cancel,

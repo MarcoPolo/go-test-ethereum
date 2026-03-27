@@ -94,12 +94,10 @@ func TestQUICSynctestGeth3(t *testing.T) {
 
 		time.Sleep(2 * time.Second)
 
-		// Full mesh AddPeer
+		// Full mesh — smaller IP dials larger to avoid DiscAlreadyConnected race
 		for i := range els {
-			for j := range els {
-				if j != i {
-					els[i].Stack.Server().AddPeer(els[j].Enode())
-				}
+			for j := i + 1; j < len(els); j++ {
+				els[i].Stack.Server().AddPeer(els[j].Enode())
 			}
 		}
 
